@@ -8,9 +8,11 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "login": "trigger.dev login",
     "dev": "trigger.dev dev",
     "deploy": "trigger.dev deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo:research": "tsx src/demos/research-demo.ts"
   },
   "dependencies": {
     "@trigger.dev/sdk": "^4.4.6"
@@ -19,6 +21,7 @@
     "@trigger.dev/build": "^4.4.6",
     "@types/node": "^22.10.0",
     "trigger.dev": "^4.4.6",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.0"
   }
 }

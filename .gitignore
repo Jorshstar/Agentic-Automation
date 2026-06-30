@@ -13,6 +13,9 @@ node_modules/
 dist/
 build/
 
+# Generated video packages (storage step, later)
+output/
+
 # Logs
 *.log
 npm-debug.log*
