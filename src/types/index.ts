@@ -7,12 +7,17 @@
  * still compiles before those steps exist.
  */
 
-/** The four content niches this studio rotates through. */
+/** The preset content niches this studio rotates through, plus "custom" for
+ *  one-off identities designed from a ContentBrief (never in the rotation). */
 export type Niche =
   | "scary-stories"
   | "tech-news"
   | "relationship-advice"
-  | "user-storytelling";
+  | "user-storytelling"
+  | "custom";
+
+/** A niche that has a stored profile (everything except "custom"). */
+export type PresetNiche = Exclude<Niche, "custom">;
 
 /** Social platforms a finished video is uploaded to (manually, for now). */
 export type Platform = "youtube" | "tiktok";

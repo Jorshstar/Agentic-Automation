@@ -1,24 +1,21 @@
 /**
- * Pipeline demo — a tiny, runnable demonstration (NOT a Trigger.dev task).
+ * Research demo — the FIRST agent powered by real AI (Step 20).
  *
- * It chains the first two agents over one shared pipeline:
+ * The SAME ResearchAgent from Steps 5–7 now runs on a ClaudeResearchProvider
+ * instead of the mock. The agent code is unchanged; only its injected provider
+ * differs. The flow:
  *
- *   ResearchAgent → ScriptAgent → VoiceAgent
+ *   Topic → ResearchAgent → ResearchProvider → AIKernel.generate() → Claude
+ *         → parsed ResearchResult
  *
- * ...printing the PipelineData after each stage. All agents use MOCK providers
- * (no real AI, no network, no API keys). Run it with:
+ * Requires ANTHROPIC_API_KEY in the environment (see .env / README). Without it,
+ * the demo prints a friendly notice and exits cleanly.
  *
  *   npm run demo:research
  */
 import { ResearchAgent } from "../agents/research/research-agent.js";
-import { ScriptAgent } from "../agents/script/script-agent.js";
-import { VoiceAgent } from "../agents/voice/voice-agent.js";
-import { MockResearchProvider } from "../providers/research/mock-research-provider.js";
-import { MockScriptProvider } from "../providers/script/mock-script-provider.js";
-import { MockVoiceProvider } from "../providers/voice/mock-voice-provider.js";
-import { InMemoryAgentRegistry } from "../core/agent-registry.js";
-import type { AgentLifecycle } from "../core/lifecycle/agent-lifecycle.js";
-import type { AgentResult } from "../core/lifecycle/agent-result.js";
+import { ClaudeResearchProvider } from "../providers/research/claude-research-provider.js";
+import { createClaudeAIKernel } from "../ai/index.js";
 import type { WorkflowContext } from "../core/workflow-context.js";
 import { withWorkflowState } from "../core/workflow-context.js";
 import { WorkflowState } from "../core/workflow-state.js";
@@ -29,101 +26,91 @@ import { newCorrelationId } from "../lib/correlation.js";
 import { logger } from "../lib/logger.js";
 import { runtimeConfig } from "../config/runtime.js";
 
-/** Print one stage's result + the resulting pipeline. */
-function printStage(label: string, result: AgentResult): void {
-  console.log(`\n=== ${label} → AgentResult ===`);
-  console.log(
-    JSON.stringify(
-      {
-        success: result.success,
-        durationMs: result.durationMs,
-        warnings: result.warnings,
-        errors: result.errors,
-        metrics: result.metrics,
-      },
-      null,
-      2,
-    ),
-  );
-  console.log(`\n=== ${label} → PipelineData ===`);
-  console.log(JSON.stringify(result.pipelineData, null, 2));
+// Load .env into process.env (Node built-in). tsx doesn't do this automatically.
+try {
+  process.loadEnvFile();
+} catch {
+  // No .env file — fall back to the ambient environment.
 }
 
 async function main(): Promise<void> {
-  // Dependency injection + registration: both agents built with MOCK providers.
-  const registry = new InMemoryAgentRegistry<AgentLifecycle>();
-  registry.register(new ResearchAgent(new MockResearchProvider()));
-  registry.register(new ScriptAgent(new MockScriptProvider()));
-  registry.register(new VoiceAgent(new MockVoiceProvider()));
+  // No key ⇒ nothing to demo. Check presence only (never log the value).
+  if (!process.env.ANTHROPIC_API_KEY) {
+    logger.warn("Skipping research demo — set ANTHROPIC_API_KEY to run it");
+    return;
+  }
 
-  // Start the shared pipeline with a topic.
+  // Dependency injection: the SAME agent, wired to the REAL provider.
+  const kernel = createClaudeAIKernel();
+  const provider = new ClaudeResearchProvider(kernel);
+  const researchAgent = new ResearchAgent(provider);
+
   const topic: Topic = {
-    title: "Why the ocean glows at night",
-    angle: "bioluminescent plankton, explained in 60 seconds",
-    keywords: ["bioluminescence", "ocean", "plankton"],
+    title: "Artificial Intelligence in Healthcare",
+    angle: "how AI is changing patient care, explained in 60 seconds",
+    keywords: ["AI", "healthcare", "diagnosis", "patient care"],
   };
-  let pipeline: PipelineData = createPipelineData({ topic });
+  const pipeline: PipelineData = createPipelineData({ topic });
 
-  const baseContext: WorkflowContext = {
-    correlationId: newCorrelationId("studio-demo"),
-    executionId: newCorrelationId("exec"),
-    state: WorkflowState.Pending,
-    niche: "scary-stories",
-    logger,
-    runtime: runtimeConfig,
-    startedAt: new Date().toISOString(),
-  };
-
-  // --- Stage 1: Research ---
-  const researchAgent = registry.resolve("research-agent");
-  const researchResult = await researchAgent.run(
-    withWorkflowState(baseContext, WorkflowState.Researching),
-    pipeline,
+  const context: WorkflowContext = withWorkflowState(
+    {
+      correlationId: newCorrelationId("research-demo"),
+      executionId: newCorrelationId("exec"),
+      state: WorkflowState.Pending,
+      niche: "tech-news",
+      logger,
+      runtime: runtimeConfig,
+      startedAt: new Date().toISOString(),
+    },
+    WorkflowState.Researching,
   );
-  printStage("Research", researchResult);
-  if (!researchResult.success) {
-    logger.error("Stopping: research stage failed");
+
+  const result = await researchAgent.run(context, pipeline);
+
+  if (!result.success) {
+    logger.error("Research stage failed", { errors: result.errors });
     process.exitCode = 1;
     return;
   }
-  pipeline = researchResult.pipelineData;
 
-  // --- Stage 2: Script (depends on Research) ---
-  const scriptAgent = registry.resolve("script-agent");
-  const scriptResult = await scriptAgent.run(
-    withWorkflowState(baseContext, WorkflowState.ScriptWriting),
-    pipeline,
-  );
-  printStage("Script", scriptResult);
-  if (!scriptResult.success) {
-    logger.error("Stopping: script stage failed");
-    process.exitCode = 1;
-    return;
+  const research = result.pipelineData.research;
+  const detail = provider.lastResult; // rich result (references, warnings, usage, latency)
+
+  console.log("\n=== ResearchAgent → AI Kernel → Claude ===");
+  console.log("Provider:", provider.name);
+
+  console.log("\n--- Summary ---");
+  console.log(research?.summary ?? "(none)");
+
+  console.log("\n--- Key Points ---");
+  for (const point of research?.keyPoints ?? []) {
+    console.log(" •", point);
   }
-  pipeline = scriptResult.pipelineData;
 
-  // --- Stage 3: Voiceover (depends on Script) ---
-  const voiceAgent = registry.resolve("voice-agent");
-  const voiceResult = await voiceAgent.run(
-    withWorkflowState(baseContext, WorkflowState.VoiceGeneration),
-    pipeline,
-  );
-  printStage("Voice", voiceResult);
-  if (!voiceResult.success) {
-    logger.error("Stopping: voice stage failed");
-    process.exitCode = 1;
-    return;
+  console.log("\n--- References ---");
+  if ((research?.sources.length ?? 0) === 0) {
+    console.log(" (none returned by the model)");
+  } else {
+    for (const source of research?.sources ?? []) {
+      console.log(" -", source.url ? `${source.title} (${source.url})` : source.title);
+    }
   }
-  pipeline = voiceResult.pipelineData;
 
-  logger.info("Pipeline demo finished", {
-    hasResearch: pipeline.research !== undefined,
-    hasScript: pipeline.script !== undefined,
-    hasVoiceover: pipeline.voiceover !== undefined,
-  });
+  if (detail) {
+    console.log("\n--- Token Usage ---");
+    console.log(JSON.stringify(detail.metadata.tokenUsage));
+    console.log("\n--- Latency ---");
+    console.log(`${detail.metadata.latencyMs} ms`);
+    if (detail.warnings.length > 0) {
+      console.log("\n--- Warnings ---");
+      for (const warning of detail.warnings) {
+        console.log(" !", warning);
+      }
+    }
+  }
 }
 
 main().catch((error: unknown) => {
-  logger.error("Pipeline demo failed", { error: String(error) });
+  logger.error("Research demo failed", { error: String(error) });
   process.exitCode = 1;
 });

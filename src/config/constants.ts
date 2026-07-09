@@ -9,11 +9,12 @@ import type { Niche, Platform } from "../types/index.js";
  * rule once here and the whole app follows.
  */
 
-/** Target length of every generated video, in seconds. */
-export const VIDEO_DURATION_SECONDS = 60 as const;
+/** Target length of every generated video, in seconds (60-70s window). */
+export const VIDEO_DURATION_SECONDS = 65 as const;
 
-/** How many days a single niche stays active before the rotation advances. */
-export const NICHE_ROTATION_DAYS = 3 as const;
+/** How many days a single niche stays active before the rotation advances.
+ *  1 = a different niche every day (scary → tech → relationship → storytelling → …). */
+export const NICHE_ROTATION_DAYS = 1 as const;
 
 /**
  * Every niche the studio supports.

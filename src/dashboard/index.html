@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Content Studio</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131a26; --panel-2: #0f141d; --line: #223047;
+    --text: #e8eefc; --dim: #8fa3c4; --accent: #7c5cff; --accent-2: #22d3ee;
+    --good: #34d399; --warn: #fbbf24; --bad: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 14px; padding: 18px 26px; border-bottom: 1px solid var(--line);
+           background: linear-gradient(90deg, rgba(124,92,255,.12), rgba(34,211,238,.06)); }
+  header h1 { font-size: 19px; letter-spacing: .3px; }
+  header .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--good); box-shadow: 0 0 10px var(--good); }
+  header .busy { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+  nav { display: flex; gap: 6px; padding: 12px 22px 0; border-bottom: 1px solid var(--line); }
+  nav button { background: none; border: none; color: var(--dim); padding: 10px 16px; font-size: 14.5px; cursor: pointer;
+               border-bottom: 2px solid transparent; }
+  nav button.on { color: var(--text); border-bottom-color: var(--accent); }
+  main { padding: 22px 26px 60px; max-width: 1180px; margin: 0 auto; }
+  .hidden { display: none !important; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .grid { display: grid; gap: 16px; }
+  label { display: block; color: var(--dim); font-size: 12.5px; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .6px; }
+  input, select, textarea { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 12px; font: inherit; }
+  textarea { min-height: 84px; resize: vertical; }
+  .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .btn { display: inline-block; border: none; border-radius: 9px; padding: 11px 18px; font: 600 14px/1 inherit;
+    cursor: pointer; color: #fff; background: linear-gradient(90deg, var(--accent), #5a3df0); }
+  .btn.alt { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .chip { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+  .chip.completed, .chip.pass { background: rgba(52,211,153,.15); color: var(--good); }
+  .chip.running { background: rgba(251,191,36,.15); color: var(--warn); }
+  .chip.failed, .chip.blocked { background: rgba(248,113,113,.15); color: var(--bad); }
+  .stage-bar { display: flex; gap: 3px; margin-top: 8px; }
+  .stage-bar i { flex: 1; height: 7px; border-radius: 3px; background: var(--line); }
+  .stage-bar i.completed { background: var(--good); }
+  .stage-bar i.failed { background: var(--bad); }
+  .muted { color: var(--dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  th { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .lib { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+  .lib .card { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .lib img { width: 100%; aspect-ratio: 9/13; object-fit: cover; background: #000; }
+  .lib .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .lib h3 { font-size: 14.5px; line-height: 1.35; }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .stat b { font-size: 26px; display: block; margin-top: 4px;
+    background: linear-gradient(90deg, var(--accent-2), var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .prof { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .prof h3 { margin-bottom: 6px; }
+  .prof .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; }
+  dialog { background: #000; border: 1px solid var(--line); border-radius: 12px; padding: 0; max-width: 420px; width: 92vw; }
+  dialog video { width: 100%; display: block; }
+  dialog::backdrop { background: rgba(0,0,0,.75); }
+  pre.identity { white-space: pre-wrap; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; font-size: 13px; margin-top: 12px; }
+  #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--panel);
+    border: 1px solid var(--line); padding: 10px 18px; border-radius: 10px; opacity: 0; transition: opacity .25s; }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot" id="statusDot"></div>
+  <h1>🎛 Content Studio</h1>
+  <span class="muted" id="statusText">idle</span>
+</header>
+<nav>
+  <button data-tab="create" class="on">Create</button>
+  <button data-tab="runs">Runs</button>
+  <button data-tab="library">Library</button>
+  <button data-tab="profiles">Profiles</button>
+  <button data-tab="stats">Stats</button>
+</nav>
+<main>
+  <!-- CREATE -->
+  <section id="tab-create">
+    <div class="card" style="max-width:760px">
+      <label>What should I make? (plain words)</label>
+      <textarea id="fInstructions" placeholder="e.g. a calm bedtime history video about the fall of Rome — soft voice, candlelit visuals"></textarea>
+      <div class="row">
+        <div><label>Format</label><select id="fFormat"></select></div>
+        <div><label>Identity</label><select id="fNiche"><option value="">AI-designed (custom)</option></select></div>
+        <div><label>Duration (sec)</label><input id="fDuration" type="number" min="15" max="600" placeholder="65" /></div>
+      </div>
+      <div style="margin-top:18px; display:flex; gap:10px">
+        <button class="btn" id="btnMake">🎬 Make it</button>
+        <button class="btn alt" id="btnPreview">🎨 Preview identity</button>
+      </div>
+      <div id="previewBox" class="hidden"><pre class="identity" id="previewText"></pre></div>
+    </div>
+    <div class="card hidden" id="liveBox" style="max-width:760px; margin-top:16px">
+      <b id="liveTitle">Run</b> <span class="chip running" id="liveStatus">running</span>
+      <div class="stage-bar" id="liveStages"></div>
+      <div class="muted" id="liveDetail" style="margin-top:8px"></div>
+    </div>
+  </section>
+
+  <!-- RUNS -->
+  <section id="tab-runs" class="hidden">
+    <div class="card">
+      <table>
+        <thead><tr><th>Run</th><th>Status</th><th>Stages</th><th>Cost</th></tr></thead>
+        <tbody id="runsBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- LIBRARY -->
+  <section id="tab-library" class="hidden"><div class="grid lib" id="libGrid"></div></section>
+
+  <!-- PROFILES -->
+  <section id="tab-profiles" class="hidden"><div class="grid prof" id="profGrid"></div></section>
+
+  <!-- STATS -->
+  <section id="tab-stats" class="hidden"><div class="grid stats" id="statsGrid"></div></section>
+</main>
+
+<dialog id="player"><video controls id="playerVideo"></video></dialog>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = (p, opts) => fetch(p, opts).then((r) => r.json());
+let followRunId = null;
+
+/* tabs */
+document.querySelectorAll("nav button").forEach((b) =>
+  b.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    ["create", "runs", "library", "profiles", "stats"].forEach((t) =>
+      $("tab-" + t).classList.toggle("hidden", t !== b.dataset.tab));
+  }));
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.opacity = 1;
+  setTimeout(() => (t.style.opacity = 0), 2600);
+}
+
+/* boot: fill selectors */
+(async () => {
+  const s = await api("/api/status");
+  $("fFormat").innerHTML = s.formats.map((f) => `<option>${f}</option>`).join("");
+  $("fNiche").innerHTML += s.niches.map((n) => `<option>${n}</option>`).join("");
+})();
+
+/* create actions */
+function briefBody(dry) {
+  return JSON.stringify({
+    instructions: $("fInstructions").value,
+    niche: $("fNiche").value || undefined,
+    format: $("fFormat").value,
+    durationSeconds: $("fDuration").value ? Number($("fDuration").value) : undefined,
+    dry,
+  });
+}
+$("btnPreview").onclick = async () => {
+  $("btnPreview").disabled = true;
+  try {
+    const r = await api("/api/brief", { method: "POST", headers: { "Content-Type": "application/json" }, body: briefBody(true) });
+    if (r.error) return toast("✗ " + r.error);
+    const p = r.profile;
+    $("previewText").textContent =
+      `🎨 ${p.label} (${p.niche})\naudience: ${p.audience}\ntone: ${p.tone} · pacing: ${p.pacing}\n` +
+      `voice: ${p.voice} — ${p.voiceInstructions}\nlook: ${p.visualStyle}\ncolours: ${p.colorMood}\n` +
+      `music: ${p.musicPreset} (${p.musicMood})\ncaptions: ${p.captionFont}, ${p.captionPosition}, ${p.captionAccent}, karaoke ${p.captionKaraoke ? "on" : "off"}\n` +
+      `duration: ~${r.run.targetDurationSeconds}s`;
+    $("previewBox").classList.remove("hidden");
+  } finally { $("btnPreview").disabled = false; }
+};
+$("btnMake").onclick = async () => {
+  $("btnMake").disabled = true;
+  try {
+    const r = await api("/api/brief", { method: "POST", headers: { "Content-Type": "application/json" }, body: briefBody(false) });
+    if (r.error) return toast("✗ " + r.error);
+    followRunId = r.runId;
+    toast("🎬 started " + r.runId);
+    $("liveBox").classList.remove("hidden");
+  } finally { $("btnMake").disabled = false; }
+};
+
+/* polling: status + runs (+ live follow) */
+async function tick() {
+  try {
+    const [s, runs] = await Promise.all([api("/api/status"), api("/api/runs")]);
+    const busy = !!s.activeRunId;
+    $("statusDot").classList.toggle("busy", busy);
+    $("statusText").textContent = busy ? "producing " + s.activeRunId : "idle";
+    renderRuns(runs);
+    if (!followRunId && busy) followRunId = s.activeRunId;
+    if (followRunId) {
+      const run = runs.find((r) => r.runId === followRunId);
+      if (run) renderLive(run);
+    }
+  } catch { /* server briefly busy — next tick */ }
+}
+setInterval(tick, 2500); tick();
+
+function renderLive(run) {
+  $("liveBox").classList.remove("hidden");
+  $("liveTitle").textContent = run.runId;
+  $("liveStatus").textContent = run.status;
+  $("liveStatus").className = "chip " + run.status;
+  $("liveStages").innerHTML = run.stages.map((s) => `<i class="${s.status}" title="${s.name}"></i>`).join("");
+  const last = run.stages[run.stages.length - 1];
+  $("liveDetail").textContent = run.stages.length
+    ? `${run.stages.length} stages · latest: ${last.name} (${last.status}) · $${run.costUsd.toFixed(2)}`
+    : "starting…";
+  if (run.status === "completed") { toast("✅ " + run.runId + " done"); followRunId = null; loadLibrary(); }
+  if (run.status === "failed") { toast("❌ run failed — see Runs tab"); followRunId = null; }
+}
+
+function renderRuns(runs) {
+  $("runsBody").innerHTML = runs.map((r) => `
+    <tr>
+      <td><div>${r.runId}</div><div class="muted">${r.niche}</div></td>
+      <td><span class="chip ${r.status}">${r.status}</span></td>
+      <td style="min-width:180px"><div class="stage-bar">${r.stages.map((s) => `<i class="${s.status}" title="${s.name}: ${s.status}"></i>`).join("")}</div>
+          <div class="muted">${r.stages.filter((s) => s.status === "completed").length}/${r.stages.length || "…"} stages</div></td>
+      <td>$${r.costUsd.toFixed(2)}</td>
+    </tr>`).join("");
+  renderStats(runs);
+}
+
+/* library */
+async function loadLibrary() {
+  const items = await api("/api/library");
+  $("libGrid").innerHTML = items.map((v) => `
+    <div class="card">
+      ${v.hasThumb ? `<img src="/media/final/${encodeURIComponent(v.dir)}/thumbnail.jpg" loading="lazy">` : `<img alt="">`}
+      <div class="body">
+        <h3>${v.ytTitle}</h3>
+        <div class="muted">${v.niche} · ${v.durationSeconds}s · <span class="chip ${v.qaPassed ? "pass" : "blocked"}">${v.qaPassed ? "QA PASS" : "BLOCKED"}</span></div>
+        <div style="display:flex; gap:8px; margin-top:auto">
+          ${v.hasVideo ? `<button class="btn" onclick="play('${v.dir}')">▶ Play</button>` : ""}
+          <button class="btn alt" onclick="copyKit('${v.dir}')">📋 Kit</button>
+          <button class="btn alt" onclick="sendTg('${v.dir}', this)">📨</button>
+        </div>
+      </div>
+    </div>`).join("") || `<div class="muted">No finished videos yet — make one in Create.</div>`;
+}
+window.play = (dir) => {
+  $("playerVideo").src = `/media/final/${encodeURIComponent(dir)}/video.mp4`;
+  $("player").showModal(); $("playerVideo").play();
+};
+$("player").onclick = (e) => { if (e.target === $("player")) { $("playerVideo").pause(); $("player").close(); } };
+window.copyKit = async (dir) => {
+  const text = await fetch(`/media/final/${encodeURIComponent(dir)}/upload.txt`).then((r) => r.text());
+  await navigator.clipboard.writeText(text);
+  toast("📋 upload kit copied");
+};
+window.sendTg = async (dir, btn) => {
+  btn.disabled = true; toast("📨 sending to Telegram…");
+  const r = await api("/api/deliver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dir }) });
+  toast(r.delivered ? "✅ sent to Telegram" : "✗ send failed"); btn.disabled = false;
+};
+
+/* profiles */
+(async () => {
+  const profs = await api("/api/profiles");
+  $("profGrid").innerHTML = Object.values(profs).map((p) => `
+    <div class="card">
+      <h3>${p.label}</h3>
+      <div class="muted">voice: <b>${p.voice}</b> · pacing: ${p.pacing} · music: ${p.musicPreset}</div>
+      <div class="muted" style="margin-top:6px">${p.visualStyle}</div>
+      <div class="muted" style="margin-top:6px">captions: ${p.captionFont} <span class="sw" style="background:${p.captionAccent}"></span> ${p.captionKaraoke ? "karaoke" : "plain"}</div>
+    </div>`).join("");
+})();
+
+/* stats */
+function renderStats(runs) {
+  const done = runs.filter((r) => r.status === "completed");
+  const spend = runs.reduce((s, r) => s + r.costUsd, 0);
+  $("statsGrid").innerHTML = `
+    <div class="card stat">Videos completed<b>${done.length}</b></div>
+    <div class="card stat">Total runs<b>${runs.length}</b></div>
+    <div class="card stat">Total spend<b>$${spend.toFixed(2)}</b></div>
+    <div class="card stat">Avg cost / video<b>$${done.length ? (done.reduce((s, r) => s + r.costUsd, 0) / done.length).toFixed(2) : "0.00"}</b></div>`;
+}
+loadLibrary();
+</script>
+</body>
+</html>

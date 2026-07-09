@@ -1,4 +1,5 @@
 import { defineConfig } from "@trigger.dev/sdk";
+import { ffmpeg } from "@trigger.dev/build/extensions/core";
 
 /**
  * Trigger.dev project configuration.
@@ -11,8 +12,8 @@ import { defineConfig } from "@trigger.dev/sdk";
  * Docs: https://trigger.dev/docs/config/config-file
  */
 export default defineConfig({
-  // TODO: paste your real project ref here (proj_...).
-  project: "REPLACE_WITH_YOUR_PROJECT_REF",
+  // Your Trigger.dev project ref (cloud.trigger.dev → Content Studio).
+  project: "proj_lnmwstqoufqzlssjxrpz",
 
   // Standard Node runtime.
   runtime: "node",
@@ -38,4 +39,10 @@ export default defineConfig({
 
   // Where Trigger.dev looks for your task files.
   dirs: ["./src/trigger"],
+
+  // Install ffmpeg + ffprobe in the deployed container (Composition, Music, QA,
+  // Voice all shell out to them). Without this, the cloud image has no ffmpeg.
+  build: {
+    extensions: [ffmpeg()],
+  },
 });

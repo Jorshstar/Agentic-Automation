@@ -46,3 +46,50 @@ export interface SummarizeRequest {
 export interface SummarizeResult {
   readonly summary: string;
 }
+
+/**
+ * The fixed context an AI research provider needs but the {@link ResearchRequest}
+ * doesn't carry (the agent only knows the topic). Supplied to the provider at
+ * construction time and fed into the prompt's required variables.
+ */
+export interface ResearchContext {
+  readonly audience: string;
+  readonly tone: string;
+  readonly language: string;
+  readonly platform: string;
+}
+
+/** A source/citation for a research finding (URL optional — models may omit it). */
+export interface ResearchReference {
+  readonly title: string;
+  readonly url?: string;
+}
+
+/** Tokens + timing + routing recorded for one AI research call. */
+export interface ResearchResultMetadata {
+  readonly promptId: string;
+  readonly promptVersion: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly tokenUsage: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly totalTokens: number;
+  };
+  readonly latencyMs: number;
+}
+
+/**
+ * ResearchResult — the RICH, strongly-typed output of an AI research call.
+ *
+ * The provider parses the model's raw text into this structure. `warnings`
+ * captures anything the parser couldn't do cleanly (e.g. no key points found),
+ * and `metadata` carries token usage / latency for observability.
+ */
+export interface ResearchResult {
+  readonly summary: string;
+  readonly keyPoints: readonly string[];
+  readonly references: readonly ResearchReference[];
+  readonly warnings: readonly string[];
+  readonly metadata: ResearchResultMetadata;
+}

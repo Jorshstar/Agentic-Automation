@@ -12,16 +12,53 @@
     "dev": "trigger.dev dev",
     "deploy": "trigger.dev deploy",
     "typecheck": "tsc --noEmit",
-    "demo:research": "tsx src/demos/research-demo.ts"
+    "test": "vitest run",
+    "demo:research": "tsx src/demos/research-demo.ts",
+    "demo:brain": "tsx src/demos/brain-demo.ts",
+    "demo:execution": "tsx src/demos/execution-demo.ts",
+    "demo:retry": "tsx src/demos/retry-demo.ts",
+    "demo:decision": "tsx src/demos/decision-demo.ts",
+    "demo:ai": "tsx src/demos/ai-demo.ts",
+    "demo:prompts": "tsx src/demos/prompts-demo.ts",
+    "demo:provider": "tsx src/demos/provider-demo.ts",
+    "demo:claude": "tsx src/demos/claude-demo.ts",
+    "demo:generate": "tsx src/demos/generate-demo.ts",
+    "demo:content-plan": "tsx src/demos/content-plan-demo.ts",
+    "demo:narrative": "tsx src/demos/narrative-demo.ts",
+    "demo:visual-direction": "tsx src/demos/visual-direction-demo.ts",
+    "demo:asset-plan": "tsx src/demos/asset-plan-demo.ts",
+    "demo:scene-plan": "tsx src/demos/scene-plan-demo.ts",
+    "demo:asset-generation": "tsx src/demos/asset-generation-demo.ts",
+    "demo:voice-generation": "tsx src/demos/voice-generation-demo.ts",
+    "demo:niches": "tsx src/demos/niche-demo.ts",
+    "demo:captions": "tsx src/demos/caption-demo.ts",
+    "demo:image-generation": "tsx src/demos/image-generation-demo.ts",
+    "demo:music": "tsx src/demos/music-demo.ts",
+    "demo:compose": "tsx src/demos/compose-demo.ts",
+    "demo:qa": "tsx src/demos/qa-demo.ts",
+    "demo:studio": "tsx src/demos/studio-demo.ts",
+    "studio:resume": "tsx src/demos/studio-demo.ts --resume",
+    "studio:brief": "tsx src/demos/brief-demo.ts",
+    "studio:brief:dry": "tsx src/demos/brief-demo.ts --dry",
+    "studio:listen": "tsx src/telegram/listen.ts",
+    "studio:dashboard": "tsx src/dashboard/server.ts",
+    "studio:command": "tsx src/telegram/command-once.ts",
+    "demo:deliver": "tsx src/demos/deliver-demo.ts",
+    "demo:alert": "tsx src/demos/alert-demo.ts",
+    "demo:memory": "tsx src/demos/memory-demo.ts",
+    "demo:seo": "tsx src/demos/seo-demo.ts",
+    "demo:thumbnail": "tsx src/demos/thumbnail-demo.ts"
   },
   "dependencies": {
-    "@trigger.dev/sdk": "^4.4.6"
+    "@anthropic-ai/sdk": "^0.109.0",
+    "@trigger.dev/sdk": "4.5.0"
   },
   "devDependencies": {
-    "@trigger.dev/build": "^4.4.6",
+    "@trigger.dev/build": "4.5.0",
     "@types/node": "^22.10.0",
     "trigger.dev": "^4.4.6",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.9"
   }
 }

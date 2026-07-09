@@ -1,0 +1,1036 @@
+import type { PromptDefinition } from "./prompt-registry.js";
+import { InMemoryPromptRegistry } from "./prompt-registry.js";
+import { PromptManager } from "./prompt-manager.js";
+
+/**
+ * Mock prompt definitions — short, realistic-shaped prompts for validating the
+ * ARCHITECTURE (not prompt quality). All in memory; no files, no DB.
+ *
+ * `research.system` intentionally has two versions to demonstrate versioning and
+ * the "active version" (its metadata points at v2).
+ */
+const ISO = "2026-01-01T00:00:00.000Z";
+
+export const MOCK_PROMPTS: readonly PromptDefinition[] = [
+  {
+    metadata: {
+      id: "research.system",
+      name: "Research System Prompt",
+      description: "Instructs the model to research short-form video topics.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v2",
+      status: "stable",
+      tags: ["research", "system"],
+      outputFormat: "text",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.4,
+      requiredVariables: ["topic", "audience", "tone", "language", "platform"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "experimental",
+        template: "You research short-form video topics.",
+        createdAt: ISO,
+      },
+      {
+        version: "v2",
+        status: "stable",
+        template:
+          "You are a research assistant preparing a {{tone}} {{platform}} short-form video " +
+          "about \"{{topic}}\" for a {{audience}} audience, written in {{language}}.\n\n" +
+          "Produce a concise, factual research briefing with exactly this structure:\n" +
+          "1. A one-paragraph summary (2-4 sentences).\n" +
+          "2. A blank line, then 5 key points, each on its own line starting with \"- \".\n" +
+          "Keep every point short, accurate, and suitable for a 60-second video.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "research.user",
+      name: "Research User Prompt",
+      description: "Asks the model to research a specific topic.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["research", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      temperature: 0.5,
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "Research the topic {{topic}} for a {{audience}} audience. Return the key points.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "script.system",
+      name: "Script System Prompt",
+      description: "Sets the model up as a short-form scriptwriter.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["script", "system"],
+      outputFormat: "text",
+      temperature: 0.7,
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template: "You are a scriptwriter for 60-second faceless videos.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "script.user",
+      name: "Script User Prompt",
+      description: "Asks the model to write a script from research.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["script", "user"],
+      outputFormat: "markdown",
+      temperature: 0.8,
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "Write a {{duration}}-second script about {{topic}} in a {{tone}} tone for {{platform}} in {{language}}.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "voice.system",
+      name: "Voice System Prompt",
+      description: "Turns a script into voiceover direction.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["voice", "system"],
+      outputFormat: "structured",
+      temperature: 0.3,
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template: "You convert scripts into natural voiceover direction.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "seo.system",
+      name: "SEO System Prompt",
+      description: "Writes SEO metadata for short-form videos.",
+      owner: "growth-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "experimental",
+      tags: ["seo", "system"],
+      outputFormat: "json",
+      temperature: 0.6,
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "experimental",
+        template: "You write SEO titles, descriptions, and tags for {{platform}} videos.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "content-plan.system",
+      name: "Content Plan System Prompt",
+      description: "Frames the model as a short-form video content strategist.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["content-plan", "system"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.4,
+      requiredVariables: ["audience", "tone", "platform"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are a senior short-form video content strategist for {{platform}}. You turn " +
+          "raw research into a tight, faithful content plan tuned for a {{audience}} audience " +
+          "in a {{tone}} tone. You never invent facts beyond the research, you keep hooks " +
+          "punchy, and you always respect the target duration.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "content-plan.user",
+      name: "Content Plan User Prompt",
+      description: "Turns research into a structured, JSON content plan.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["content-plan", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.4,
+      requiredVariables: [
+        "topic",
+        "researchSummary",
+        "keyPoints",
+        "audience",
+        "tone",
+        "platform",
+        "language",
+        "targetDurationSeconds",
+      ],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are an expert short-form video content strategist. Using ONLY the research " +
+          "below, produce a structured CONTENT PLAN for a {{targetDurationSeconds}}-second " +
+          "{{platform}} video in {{language}}, for a {{audience}} audience, in a {{tone}} tone.\n\n" +
+          "Topic: {{topic}}\n\n" +
+          "Research summary:\n{{researchSummary}}\n\n" +
+          "Key research points:\n{{keyPoints}}\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
+          "{\n" +
+          "  \"hook\": string,\n" +
+          "  \"coreMessage\": string,\n" +
+          "  \"targetAudience\": string,\n" +
+          "  \"tone\": string,\n" +
+          "  \"estimatedDurationSeconds\": number,\n" +
+          "  \"sections\": [ { \"title\": string, \"purpose\": string, \"durationSeconds\": number, \"keyPoints\": string[] } ],\n" +
+          "  \"callToAction\": string,\n" +
+          "  \"visualStyle\": string,\n" +
+          "  \"riskNotes\": string[]\n" +
+          "}\n\n" +
+          "Rules: provide 3-5 sections whose durationSeconds sum to about " +
+          "{{targetDurationSeconds}}. Keep every field faithful to the research.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "narrative.system",
+      name: "Narrative System Prompt",
+      description: "Frames the model as a voiceover scriptwriter for short-form video.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["narrative", "system"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.6,
+      requiredVariables: ["tone", "platform"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are a professional scriptwriter for {{platform}} short-form videos. You write " +
+          "natural, spoken-word narration in a {{tone}} tone, optimized for AI voiceover: short " +
+          "sentences, clear rhythm, no stage directions inside the spoken text, and no words a " +
+          "text-to-speech engine would mispronounce. You follow the given content plan exactly, " +
+          "preserving its section order and respecting the target duration.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "narrative.user",
+      name: "Narrative User Prompt",
+      description: "Turns a content plan into a timed, structured narration script.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["narrative", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.6,
+      requiredVariables: [
+        "hook",
+        "coreMessage",
+        "tone",
+        "targetAudience",
+        "sections",
+        "callToAction",
+        "targetDurationSeconds",
+        "minWords",
+        "maxWords",
+        "platform",
+        "language",
+      ],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "Write the spoken narration for a {{targetDurationSeconds}}-second {{platform}} video " +
+          "in {{language}}, for a {{targetAudience}} audience, in a {{tone}} tone.\n\n" +
+          "#1 RULE — LENGTH: the TOTAL spoken words across ALL segments must be between " +
+          "{{minWords}} and {{maxWords}} words. This is the most important rule and OVERRIDES " +
+          "everything else: compress, merge, or drop content to stay within it. Never exceed " +
+          "{{maxWords}} and never go below {{minWords}}. Count the words as you write.\n\n" +
+          "Use this content plan as a GUIDE (keep the overall order), but you do NOT have to cover " +
+          "every point — fitting the word limit matters more than completeness.\n\n" +
+          "Hook idea: {{hook}}\n" +
+          "Core message: {{coreMessage}}\n" +
+          "Call to action: {{callToAction}}\n\n" +
+          "Sections (in order):\n{{sections}}\n\n" +
+          "Turn each section into one or more timed narration segments. The segments must form a " +
+          "continuous timeline starting at 0 and ending as close as possible to " +
+          "{{targetDurationSeconds}} seconds (no gaps, no overlaps). Remember the hard word limit " +
+          "above ({{minWords}}-{{maxWords}} words total).\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
+          "{\n" +
+          "  \"hook\": string,\n" +
+          "  \"segments\": [ { \"startSecond\": number, \"endSecond\": number, \"text\": string, \"emotion\": string, \"visualHint\": string } ],\n" +
+          "  \"callToAction\": string,\n" +
+          "  \"estimatedDurationSeconds\": number\n" +
+          "}\n\n" +
+          "Rules: `text` is the exact words to be spoken (natural, conversational). `emotion` is a " +
+          "single word (e.g. curious, urgent, reassuring). `visualHint` is a short on-screen visual " +
+          "suggestion. Keep the total close to {{targetDurationSeconds}} seconds.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "visual-direction.system",
+      name: "Visual Direction System Prompt",
+      description: "Frames the model as an art director for short-form video.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["visual-direction", "system"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.5,
+      requiredVariables: ["platform"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are a senior art director for {{platform}} short-form videos. For each narration " +
+          "segment you recommend a visual treatment: the best asset type, camera movement, visual " +
+          "style, color mood, transition, and animation. You only RECOMMEND direction — you never " +
+          "generate assets — and you keep every recommendation practical and consistent with the " +
+          "overall look.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "visual-direction.user",
+      name: "Visual Direction User Prompt",
+      description: "Turns a narration timeline into per-segment visual direction.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["visual-direction", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.5,
+      requiredVariables: ["segments", "platform", "overallVisualStyle"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are directing the visuals for a {{platform}} short-form video.\n" +
+          "Overall visual style to stay consistent with: {{overallVisualStyle}}\n\n" +
+          "For EACH narration segment below, recommend a visual treatment. Preserve the segment " +
+          "ids and their order.\n\n" +
+          "Segments:\n{{segments}}\n\n" +
+          "For `assetType`, choose EXACTLY ONE of: stock-video, ai-image, ai-video, " +
+          "motion-graphics, screen-recording, mixed.\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
+          "{\n" +
+          "  \"segments\": [ {\n" +
+          "    \"segmentId\": string,\n" +
+          "    \"assetType\": string,\n" +
+          "    \"cameraMovement\": string,\n" +
+          "    \"visualStyle\": string,\n" +
+          "    \"colorMood\": string,\n" +
+          "    \"transition\": string,\n" +
+          "    \"animationStyle\": string,\n" +
+          "    \"preferredSource\": string,\n" +
+          "    \"notes\": string\n" +
+          "  } ]\n" +
+          "}\n\n" +
+          "Rules: output exactly one segment per input segment, with the SAME segmentId and order. " +
+          "`preferredSource` is a short hint (e.g. \"Pexels\", \"AI (Flux)\", \"After Effects\"). " +
+          "These are recommendations only — no assets are generated here.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "asset-plan.system",
+      name: "Asset Plan System Prompt",
+      description: "Frames the model as a media sourcing producer for short-form video.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["asset-plan", "system"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.4,
+      requiredVariables: ["platform"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are a media sourcing producer for {{platform}} short-form videos. For each visual " +
+          "segment you recommend WHERE to get the asset (a primary and a fallback provider) and " +
+          "HOW to find or generate it (search queries or a generation prompt). You only PLAN " +
+          "sourcing — you never download or generate anything — and you keep every recommendation " +
+          "practical and license-aware.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "asset-plan.user",
+      name: "Asset Plan User Prompt",
+      description: "Turns a visual direction plan into a per-segment asset-sourcing plan.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["asset-plan", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.4,
+      requiredVariables: ["segments", "platform", "targetDurationSeconds"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are planning how to SOURCE the visual assets for a {{platform}} short-form video " +
+          "with a total length near {{targetDurationSeconds}} seconds.\n\n" +
+          "For EACH visual segment below, produce an asset-sourcing plan. Preserve the segment ids " +
+          "and their order.\n\n" +
+          "Segments:\n{{segments}}\n\n" +
+          "Choose `primaryProvider` and `fallbackProvider` for each segment from EXACTLY this " +
+          "list: pexels, pixabay, unsplash, runway, openai-images, google-veo, user-library, " +
+          "local-storage.\n\n" +
+          "Guidance: stock-video → pexels or pixabay; ai-image → openai-images or runway; " +
+          "ai-video → runway or google-veo; motion-graphics → local-storage or user-library; " +
+          "screen-recording → user-library or local-storage; mixed → pick the best fit and a " +
+          "sensible fallback.\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
+          "{\n" +
+          "  \"segments\": [ {\n" +
+          "    \"segmentId\": string,\n" +
+          "    \"assetType\": string,\n" +
+          "    \"primaryProvider\": string,\n" +
+          "    \"fallbackProvider\": string,\n" +
+          "    \"searchQueries\": string[],\n" +
+          "    \"visualPrompt\": string,\n" +
+          "    \"estimatedDuration\": number,\n" +
+          "    \"licenseRequirements\": string,\n" +
+          "    \"notes\": string\n" +
+          "  } ]\n" +
+          "}\n\n" +
+          "Rules: output exactly one segment per input segment, with the SAME segmentId and order. " +
+          "`searchQueries` are 2-4 short stock-search phrases (most useful for stock providers). " +
+          "`visualPrompt` is a detailed generation prompt (most useful for ai-image/ai-video). " +
+          "`estimatedDuration` is in seconds and the segments should sum to about " +
+          "{{targetDurationSeconds}}. `licenseRequirements` is a short note (e.g. \"royalty-free\", " +
+          "\"commercial use OK\"). These are recommendations only — nothing is downloaded or generated.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "scene-plan.system",
+      name: "Scene Plan System Prompt",
+      description: "Frames the model as a video editor assembling the final shot list.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["scene-plan", "system"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.4,
+      requiredVariables: ["platform"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are a senior video editor assembling the final shot list for a {{platform}} " +
+          "short-form video. You merge the narration timeline, the visual direction, and the asset " +
+          "plan into one ordered list of scenes — the exact execution contract the production " +
+          "pipeline runs. You never generate assets, audio, or captions; you only decide how each " +
+          "scene is composed.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "scene-plan.user",
+      name: "Scene Plan User Prompt",
+      description: "Merges narration, visual direction, and asset plan into one scene plan.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["scene-plan", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.4,
+      requiredVariables: ["segments", "platform"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "Merge the narration timeline, visual direction, and asset plan below into a single " +
+          "ordered SCENE PLAN for a {{platform}} short-form video. Produce exactly one scene per " +
+          "segment, in order, keeping the segment ids.\n\n" +
+          "Segments (narration + visual + asset, aligned by id):\n{{segments}}\n\n" +
+          "For `captionPosition` choose EXACTLY ONE of: top, center, bottom, none.\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
+          "{\n" +
+          "  \"scenes\": [ {\n" +
+          "    \"sceneId\": string,\n" +
+          "    \"segmentId\": string,\n" +
+          "    \"startSecond\": number,\n" +
+          "    \"endSecond\": number,\n" +
+          "    \"primaryAsset\": string,\n" +
+          "    \"fallbackAsset\": string,\n" +
+          "    \"cameraMovement\": string,\n" +
+          "    \"transitionIn\": string,\n" +
+          "    \"transitionOut\": string,\n" +
+          "    \"overlayText\": string,\n" +
+          "    \"captionPosition\": string,\n" +
+          "    \"voiceSegmentId\": string,\n" +
+          "    \"musicMood\": string,\n" +
+          "    \"notes\": string\n" +
+          "  } ]\n" +
+          "}\n\n" +
+          "Rules: one scene per input segment, same order. `sceneId` like \"scene-1\". `segmentId` " +
+          "and `voiceSegmentId` are the segment's id (e.g. \"seg-1\"). `startSecond`/`endSecond` " +
+          "come from the narration timeline. `primaryAsset`/`fallbackAsset` are short descriptors " +
+          "combining the provider and what to fetch or generate. `overlayText` is short on-screen " +
+          "text (or empty). `musicMood` is a single mood word. Keep transitions consistent between " +
+          "adjacent scenes.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "asset-generation.system",
+      name: "Asset Generation System Prompt",
+      description: "Frames the model as an asset production coordinator.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["asset-generation", "system"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.3,
+      requiredVariables: ["platform"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are an asset production coordinator for {{platform}} short-form videos. For each " +
+          "planned asset you specify EXACTLY how it would be produced — which provider, generation " +
+          "method, format, dimensions, duration, license, and estimated cost. You describe the " +
+          "production plan only: you never fabricate real download URLs, never actually download " +
+          "or generate files, and you keep every recommendation concrete and license-aware.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "asset-generation.user",
+      name: "Asset Generation User Prompt",
+      description: "Turns an asset plan into a per-segment asset-production manifest.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["asset-generation", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.3,
+      requiredVariables: ["segments", "platform", "width", "height"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are preparing the asset-production manifest for a {{platform}} short-form video at " +
+          "{{width}}x{{height}} resolution.\n\n" +
+          "For EACH planned asset segment below, describe how the asset would be produced. Preserve " +
+          "the segment ids and their order.\n\n" +
+          "Segments:\n{{segments}}\n\n" +
+          "For `provider` choose EXACTLY ONE of: pexels, pixabay, unsplash, runway, openai-images, " +
+          "google-veo, user-library, local-storage.\n" +
+          "For `generationMethod` choose EXACTLY ONE of: stock-download, ai-image, ai-video, " +
+          "motion-graphics, screen-recording, user-provided, local-file.\n" +
+          "Set `status` to \"planned\" for every asset (nothing is produced yet).\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
+          "{\n" +
+          "  \"results\": [ {\n" +
+          "    \"segmentId\": string,\n" +
+          "    \"assetType\": string,\n" +
+          "    \"provider\": string,\n" +
+          "    \"fallbackProvider\": string,\n" +
+          "    \"generationMethod\": string,\n" +
+          "    \"sourceUrl\": string,\n" +
+          "    \"mimeType\": string,\n" +
+          "    \"width\": number,\n" +
+          "    \"height\": number,\n" +
+          "    \"durationSeconds\": number,\n" +
+          "    \"license\": string,\n" +
+          "    \"status\": string,\n" +
+          "    \"estimatedCostUsd\": number,\n" +
+          "    \"notes\": string\n" +
+          "  } ]\n" +
+          "}\n\n" +
+          "Rules: one result per input segment, same segmentId and order. `sourceUrl` is a SHORT " +
+          "source reference (e.g. \"pexels:query=medical scan\" or \"runway:generate\") — do NOT " +
+          "invent real links. `mimeType` like \"video/mp4\" or \"image/png\". `width`/`height` " +
+          "should match {{width}}x{{height}} unless a different aspect is required. " +
+          "`estimatedCostUsd` is a rough number (0 for stock/local). These are production " +
+          "descriptions only — nothing is downloaded or generated.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "topic-idea.system",
+      name: "Topic Idea System Prompt",
+      description: "Frames the model as a viral short-form content strategist.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["topic-idea", "system"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 1,
+      requiredVariables: ["niche"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are a viral short-form content strategist for {{niche}}. You invent ONE fresh, " +
+          "specific, irresistible topic idea for a 60-second vertical video — the kind that stops " +
+          "the scroll. You avoid clichés and generic angles, and you make it concrete enough to " +
+          "script immediately.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "topic-idea.user",
+      name: "Topic Idea User Prompt",
+      description: "Generates one concrete topic idea for a niche.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["topic-idea", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 1,
+      requiredVariables: ["niche", "audience", "tone", "themes", "avoidTopics", "directive"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "Invent ONE original topic for a {{niche}} short-form video, for a {{audience}} audience, " +
+          "in a {{tone}} tone. Draw loosely from these themes (don't just restate them): " +
+          "{{themes}}.\n\n" +
+          "DIRECTIVE: {{directive}}. If the directive is anything other than \"none\", the topic " +
+          "MUST directly fulfil it — treat it as the assignment, not a suggestion.\n\n" +
+          "IMPORTANT — no repeats: do NOT reuse or closely resemble any of these already-used " +
+          "topics: {{avoidTopics}}. Your idea must be clearly, meaningfully different from all of " +
+          "them.\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY:\n" +
+          "{ \"title\": string, \"angle\": string, \"hook\": string, \"keywords\": string[] }\n\n" +
+          "Rules: `title` is a short punchy working title. `angle` is the specific take. `hook` is " +
+          "the opening line that stops the scroll. `keywords` are 3-6 search terms. Be specific and " +
+          "original — no generic filler.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "seo.user",
+      name: "SEO Upload Pack User Prompt",
+      description: "Generates platform-ready YouTube/TikTok upload metadata for a finished video.",
+      owner: "growth-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["seo", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.7,
+      requiredVariables: [
+        "topic",
+        "hook",
+        "script",
+        "niche",
+        "tone",
+        "audience",
+        "keywords",
+        "durationSeconds",
+      ],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are a social-media SEO expert for short-form video. Write the upload metadata for " +
+          "this {{durationSeconds}}-second {{niche}} vertical video, for a {{audience}} audience, " +
+          "in a {{tone}} tone.\n\n" +
+          "Topic: {{topic}}\n" +
+          "Hook: {{hook}}\n" +
+          "Keywords: {{keywords}}\n\n" +
+          "Full narration:\n{{script}}\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
+          "{\n" +
+          "  \"youtube\": { \"title\": string, \"description\": string, \"tags\": string[], \"hashtags\": string[] },\n" +
+          "  \"tiktok\": { \"caption\": string, \"hashtags\": string[] },\n" +
+          "  \"thumbnailText\": string\n" +
+          "}\n\n" +
+          "Rules: thumbnailText is 2-4 punchy words for the cover image, ALL CAPS, at most 20 " +
+          "characters, curiosity-spiking, no spoilers, no hashtags, no emoji. " +
+          "youtube.title is at most 90 characters, curiosity-driven but faithful to the " +
+          "content (no false promises); one emoji is allowed. youtube.description is 2-4 sentences: " +
+          "open with the hook, tease what happens without spoiling the ending, and end with a " +
+          "call-to-action to like and subscribe — NO hashtags inside the description. youtube.tags " +
+          "are 10-15 short lowercase search phrases (no '#'). youtube.hashtags are exactly 3-5 and " +
+          "must include \"#shorts\". tiktok.caption is at most 130 characters, punchy, no hashtags " +
+          "inside it. tiktok.hashtags are 4-6 and must include \"#fyp\". Every hashtag starts with " +
+          "'#' and contains no spaces.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "identity.system",
+      name: "Identity Designer System Prompt",
+      description: "Frames the model as a creative director designing a show identity.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["identity", "system"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.8,
+      requiredVariables: ["instructions"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are a creative director who designs the complete identity of a short-form video " +
+          "show from a one-line brief: who it speaks to, how it sounds, how it looks, and how it " +
+          "feels — coherent, distinctive, and true to the brief: {{instructions}}",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "identity.user",
+      name: "Identity Designer User Prompt",
+      description: "Designs a one-off creative identity (voice, look, music) from a brief.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["identity", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.8,
+      requiredVariables: ["instructions", "voices", "musicPresets", "fonts"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "Design the complete creative identity for a short-form vertical video based on this " +
+          "brief:\n\n\"{{instructions}}\"\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
+          "{\n" +
+          "  \"label\": string,\n" +
+          "  \"audience\": string,\n" +
+          "  \"tone\": string,\n" +
+          "  \"language\": string,\n" +
+          "  \"pacing\": string,\n" +
+          "  \"voice\": string,\n" +
+          "  \"voiceInstructions\": string,\n" +
+          "  \"visualStyle\": string,\n" +
+          "  \"colorMood\": string,\n" +
+          "  \"musicMood\": string,\n" +
+          "  \"musicPreset\": string,\n" +
+          "  \"captionAccent\": string,\n" +
+          "  \"captionFont\": string,\n" +
+          "  \"captionPosition\": string,\n" +
+          "  \"captionKaraoke\": boolean,\n" +
+          "  \"themes\": string[]\n" +
+          "}\n\n" +
+          "Rules: `label` is a short show name. `pacing` is one of: slow, medium, fast. `voice` " +
+          "must be EXACTLY ONE of: {{voices}} — pick the best fit for the brief. " +
+          "`voiceInstructions` is 1-2 sentences describing the delivery style for a TTS engine. " +
+          "`visualStyle` and `colorMood` are concrete art direction (comma-separated qualities). " +
+          "`musicMood` is a human description; `musicPreset` must be EXACTLY ONE of: " +
+          "{{musicPresets}}. `captionAccent` is a hex colour like \"#E63946\" that fits the look. " +
+          "`captionFont` must be EXACTLY ONE of: {{fonts}}. `captionPosition` is always " +
+          "\"bottom\". `captionKaraoke` true for punchy/energetic content, false for calm. " +
+          "`themes` are 3-5 topic seeds this show would cover. If the brief specifies a language, " +
+          "honour it; otherwise use English.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "command.user",
+      name: "Telegram Command Parser Prompt",
+      description: "Parses a chat message into a studio command (create/preview/status/help).",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["command", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.2,
+      requiredVariables: ["message", "niches", "voices"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are the command parser for an AI video studio a user controls from chat. Parse this " +
+          "message into a command:\n\n\"{{message}}\"\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY:\n" +
+          "{\n" +
+          "  \"action\": string,\n" +
+          "  \"format\": string,\n" +
+          "  \"instructions\": string,\n" +
+          "  \"niche\": string,\n" +
+          "  \"durationSeconds\": number,\n" +
+          "  \"voice\": string,\n" +
+          "  \"visualStyle\": string,\n" +
+          "  \"musicMood\": string,\n" +
+          "  \"exactTitle\": boolean,\n" +
+          "  \"reply\": string\n" +
+          "}\n\n" +
+          "`format` is \"podcast\" when they describe a podcast, interview, conversation, or " +
+          "people sitting and talking; otherwise \"narrated-short\". " +
+          "Rules: `action` is one of: create (they want a video made), preview (they want to see " +
+          "the identity/plan first, or they say preview/dry/show me first), status (asking about " +
+          "progress/queue), help (asking what you can do), chat (anything else). " +
+          "`instructions` is the full content request in their words (what the video should be " +
+          "about, including style wishes) — empty only when action is not create/preview. " +
+          "`niche` is one of {{niches}} ONLY if the message clearly matches one, else \"none\". " +
+          "`durationSeconds` is the requested length in seconds (convert minutes), or 0 when " +
+          "unspecified. `voice` is one of {{voices}} ONLY if they named or clearly described one " +
+          "(e.g. \"deep male voice\" → onyx), else \"none\". `visualStyle` captures any wishes " +
+          "about the pictures/visuals in their words, else \"none\". `musicMood` captures any " +
+          "wishes about music/sound, else \"none\". `exactTitle` is true only if they clearly gave " +
+          "an exact title in quotes. `reply` is a short friendly reply used ONLY for chat/help.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "podcast-script.user",
+      name: "Podcast Script User Prompt",
+      description: "Writes a two-host podcast conversation (cast + dialogue turns).",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["podcast", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.8,
+      requiredVariables: [
+        "topic",
+        "researchSummary",
+        "keyPoints",
+        "tone",
+        "audience",
+        "language",
+        "minWords",
+        "maxWords",
+        "voices",
+      ],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "Write a short two-host podcast conversation about: {{topic}}\n\n" +
+          "Audience: {{audience}}. Tone: {{tone}}. Language: {{language}}.\n\n" +
+          "#1 RULE — LENGTH: the TOTAL spoken words across ALL turns must be between {{minWords}} " +
+          "and {{maxWords}} words — NEVER fewer than {{minWords}}. Dialogue tends to run short: " +
+          "if your draft is under the minimum, ADD MORE EXCHANGES (a deeper point, one more " +
+          "playful disagreement, a concrete example or story) — do not pad sentences. Count the " +
+          "words before answering.\n\n" +
+          "Ground the conversation in this research (don't invent facts beyond it):\n" +
+          "{{researchSummary}}\n\nKey points:\n{{keyPoints}}\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY:\n" +
+          "{\n" +
+          "  \"cast\": [ { \"name\": string, \"voice\": string, \"voiceInstructions\": string, \"persona\": string },\n" +
+          "             { \"name\": string, \"voice\": string, \"voiceInstructions\": string, \"persona\": string } ],\n" +
+          "  \"turns\": [ { \"speaker\": string, \"text\": string, \"emotion\": string } ]\n" +
+          "}\n\n" +
+          "Rules: EXACTLY two cast members with short first names and DIFFERENT `voice` values, " +
+          "each EXACTLY ONE of: {{voices}} — pick voices that fit their personas. " +
+          "`voiceInstructions` describes each host's delivery for a TTS engine (1-2 sentences). " +
+          "`persona` is a one-line visual description (age vibe, style) for the studio shots. " +
+          "Every turn's `speaker` must be one of the two cast names. Make it a REAL conversation: " +
+          "reactions, questions, light disagreement, humour that fits the tone — not alternating " +
+          "monologues. Open with a quick cold-open hook (no long intros), end with a short outro " +
+          "and a follow call-to-action. `emotion` is one word.",
+        createdAt: ISO,
+      },
+    ],
+  },
+];
+
+/** Build a PromptManager seeded with the mock prompts (all in memory). */
+export function createDefaultPromptManager(): PromptManager {
+  const registry = new InMemoryPromptRegistry();
+  for (const definition of MOCK_PROMPTS) {
+    registry.register(definition);
+  }
+  return new PromptManager(registry);
+}
