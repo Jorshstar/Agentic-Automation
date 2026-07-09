@@ -20,6 +20,9 @@ output/
 *.log
 npm-debug.log*
 
+# Scratch command-output dumps (ffmpeg/ffprobe debugging, etc.)
+/*.txt
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db
