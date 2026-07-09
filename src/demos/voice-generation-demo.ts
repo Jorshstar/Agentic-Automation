@@ -35,6 +35,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "What if a computer could spot cancer as accurately as a top specialist? It's already happening.",
       emotion: "curious",
       visualHint: "AI scanning a medical X-ray",
+      stockKeyword: "",
     },
     {
       startSecond: 8,
@@ -42,6 +43,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "AI can analyze medical scans to help catch diseases earlier than ever before.",
       emotion: "informative",
       visualHint: "CT scan with AI markers",
+      stockKeyword: "",
     },
     {
       startSecond: 16,
@@ -49,6 +51,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "But here's the key: AI assists doctors, it does not replace them.",
       emotion: "reassuring",
       visualHint: "Doctor reviewing AI results",
+      stockKeyword: "",
     },
     {
       startSecond: 24,
@@ -56,6 +59,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "Would you trust AI to help with your diagnosis? Comment and follow for more!",
       emotion: "engaging",
       visualHint: "Comment and follow prompts",
+      stockKeyword: "",
     },
   ],
   callToAction: "Would you trust AI to help with your diagnosis? Comment and follow for more!",

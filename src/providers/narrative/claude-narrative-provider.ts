@@ -210,6 +210,7 @@ function asSegmentArray(value: unknown, warnings: string[]): readonly NarrativeS
         text: asString(record["text"], ""),
         emotion: asString(record["emotion"], "neutral"),
         visualHint: asString(record["visualHint"], ""),
+        stockKeyword: asString(record["stockKeyword"], ""),
       });
     } else {
       warnings.push("Skipped a malformed segment entry.");

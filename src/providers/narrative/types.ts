@@ -34,6 +34,12 @@ export interface NarrativeSegment {
   readonly emotion: string;
   /** A short on-screen visual suggestion for this beat. */
   readonly visualHint: string;
+  /**
+   * A GENERIC 2-4 word stock-footage search phrase for this beat — a real,
+   * filmable scene with NO brand names, product names, or proper nouns (so it
+   * matches free stock libraries). Optional: absent on older/synthetic scripts.
+   */
+  readonly stockKeyword?: string;
 }
 
 /** Tokens + timing + routing recorded for one narration generation. */

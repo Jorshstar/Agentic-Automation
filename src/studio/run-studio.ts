@@ -393,7 +393,11 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
           const segmentId = `seg-${i + 1}`;
           const res = await stock.find({
             segmentId,
-            query: stockQueryForSegment(segment.visualHint, segment.text),
+            // Prefer the AI's purpose-built generic stock keyword; fall back to
+            // keyword-stripping the visual hint / narration for older scripts.
+            query: segment.stockKeyword && segment.stockKeyword.trim() !== ""
+              ? segment.stockKeyword
+              : stockQueryForSegment(segment.visualHint, segment.text),
             neededSeconds: Math.max(2, Math.round(segment.endSecond - segment.startSecond)),
           });
           if (res.clip) {
@@ -812,6 +816,7 @@ function turnsToNarrative(turns: readonly PodcastTurn[], targetSeconds: number):
       text: turn.text,
       emotion: turn.emotion,
       visualHint: "",
+      stockKeyword: "",
     };
     cursor += share;
     return segment;

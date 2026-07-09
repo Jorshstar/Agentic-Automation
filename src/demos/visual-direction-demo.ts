@@ -37,6 +37,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "What if a computer could spot cancer as accurately as a top specialist? It's already happening.",
       emotion: "curious",
       visualHint: "AI scanning a medical X-ray with highlighted areas",
+      stockKeyword: "",
     },
     {
       startSecond: 8,
@@ -44,6 +45,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "AI can analyze medical scans to help catch diseases earlier than ever before.",
       emotion: "informative",
       visualHint: "Close-up of a CT scan with AI markers detecting anomalies",
+      stockKeyword: "",
     },
     {
       startSecond: 16,
@@ -51,6 +53,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "It can even predict a patient's risks early, giving doctors a chance to act faster.",
       emotion: "hopeful",
       visualHint: "Dashboard showing patient risk scores and trend graphs",
+      stockKeyword: "",
     },
     {
       startSecond: 24,
@@ -58,6 +61,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "AI also handles time-consuming paperwork, freeing doctors to spend real time with patients.",
       emotion: "reassuring",
       visualHint: "Doctor talking warmly with a patient, paperwork fading away",
+      stockKeyword: "",
     },
     {
       startSecond: 32,
@@ -65,6 +69,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "And with personalized medicine, treatments can be tailored to your unique data.",
       emotion: "encouraging",
       visualHint: "DNA strands and a personalized treatment plan on screen",
+      stockKeyword: "",
     },
     {
       startSecond: 40,
@@ -72,6 +77,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "But here's the key: AI assists decisions, it does not replace your doctor.",
       emotion: "serious",
       visualHint: "Doctor reviewing AI suggestions, making the final call",
+      stockKeyword: "",
     },
     {
       startSecond: 47,
@@ -79,6 +85,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "Accuracy and privacy still matter enormously, with human judgment at the heart of care.",
       emotion: "serious",
       visualHint: "Shield icon over patient data, doctor and AI side by side",
+      stockKeyword: "",
     },
     {
       startSecond: 54,
@@ -86,6 +93,7 @@ const SAMPLE_NARRATIVE: NarrativeScript = {
       text: "AI is a powerful tool working alongside doctors. Would you trust it? Comment and follow!",
       emotion: "engaging",
       visualHint: "Split screen of doctor and AI, comment and follow prompts",
+      stockKeyword: "",
     },
   ],
   callToAction: "Would you trust AI to help with your diagnosis? Comment and follow for more!",

@@ -337,13 +337,17 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
           "{\n" +
           "  \"hook\": string,\n" +
-          "  \"segments\": [ { \"startSecond\": number, \"endSecond\": number, \"text\": string, \"emotion\": string, \"visualHint\": string } ],\n" +
+          "  \"segments\": [ { \"startSecond\": number, \"endSecond\": number, \"text\": string, \"emotion\": string, \"visualHint\": string, \"stockKeyword\": string } ],\n" +
           "  \"callToAction\": string,\n" +
           "  \"estimatedDurationSeconds\": number\n" +
           "}\n\n" +
           "Rules: `text` is the exact words to be spoken (natural, conversational). `emotion` is a " +
           "single word (e.g. curious, urgent, reassuring). `visualHint` is a short on-screen visual " +
-          "suggestion. Keep the total close to {{targetDurationSeconds}} seconds.",
+          "suggestion. `stockKeyword` is a GENERIC 2-4 word stock-footage search phrase for a real, " +
+          "filmable scene that matches the MOOD or SUBJECT of this beat — with NO brand names, product " +
+          "names, or proper nouns (e.g. not \"Humane AI Pin\" but \"wearable tech device\"; not " +
+          "\"loading error\" but \"frustrated person laptop\"). Think what real footage a video editor " +
+          "would cut to here. Keep the total close to {{targetDurationSeconds}} seconds.",
         createdAt: ISO,
       },
     ],
