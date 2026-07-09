@@ -15,6 +15,7 @@ import {
   buildCompositionContext,
   buildQaContext,
   buildThumbnailContext,
+  buildStockVideoContext,
 } from "../config/niche-context.js";
 import type { RunSettings } from "../config/niche-context.js";
 import { claudeCostUsd, imagesCostUsd, ttsCostUsd } from "../config/pricing.js";
@@ -38,7 +39,9 @@ import type { SeoPack } from "../providers/seo/index.js";
 import { ClaudePodcastScriptProvider } from "../providers/podcast-script/index.js";
 import type { PodcastCastMember, PodcastTurn } from "../providers/podcast-script/index.js";
 import type { GeneratedVoiceover, GeneratedVoiceSegment } from "../providers/voice-generation/index.js";
-import type { GeneratedImage } from "../providers/image-generation/index.js";
+import type { GeneratedImage, GeneratedImages } from "../providers/image-generation/index.js";
+import { PexelsPixabayStockVideoProvider } from "../providers/stock-video/index.js";
+import { runFfmpeg } from "../lib/media.js";
 import type { VideoFormat } from "./formats.js";
 import { FfmpegThumbnailProvider } from "../providers/thumbnail-generation/index.js";
 import type { Niche } from "../types/index.js";
@@ -375,10 +378,53 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
         };
       }
 
-      log(`⑤ Generating ${narrative.segments.length} scene images (this is the slow part)...`);
-      const result = await imageProvider.generate({ assetPlan: sceneImagePlan(narrative, profile) });
-      log(`   ${result.metadata.generated}/${result.metadata.requested} images.`);
-      return result;
+      // WATERFALL: try real stock footage per scene (Pexels → Pixabay), and only
+      // pay for an AI image on the scenes stock couldn't cover. Real motion where
+      // it fits, bespoke image where it doesn't — and cheaper than all-images.
+      const plan = sceneImagePlan(narrative, profile);
+      const stockBySegment = new Map<string, string>();
+      if (run.useStockVideo) {
+        log(`⑤ Sourcing real stock footage for ${narrative.segments.length} scenes...`);
+        const stock = new PexelsPixabayStockVideoProvider({
+          ...buildStockVideoContext(run),
+          outputDir: `${runDir}/stock`,
+        });
+        for (const [i, segment] of narrative.segments.entries()) {
+          const segmentId = `seg-${i + 1}`;
+          const res = await stock.find({
+            segmentId,
+            query: stockQueryForSegment(segment.visualHint, segment.text),
+            neededSeconds: Math.max(2, Math.round(segment.endSecond - segment.startSecond)),
+          });
+          if (res.clip) {
+            stockBySegment.set(segmentId, res.clip.clipPath);
+          }
+          // "no clip found" and "no key" are expected, not failures — only surface real errors.
+          collect(
+            warnings,
+            res.warnings
+              .filter((w) => w.code === "search-failed" || w.code === "download-failed")
+              .map((w) => `stock:${w.code} ${w.message}`),
+          );
+        }
+        log(`   ${stockBySegment.size}/${narrative.segments.length} scenes got real footage; ${narrative.segments.length - stockBySegment.size} need AI images.`);
+      }
+
+      // AI-generate only the scenes stock didn't cover.
+      const uncovered: AssetPlan = {
+        ...plan,
+        segments: plan.segments.filter((s) => !stockBySegment.has(s.segmentId)),
+      };
+      let aiResult: GeneratedImages;
+      if (uncovered.segments.length > 0) {
+        const result = await imageProvider.generate({ assetPlan: uncovered });
+        log(`   ${result.metadata.generated}/${result.metadata.requested} AI images.`);
+        aiResult = result;
+      } else {
+        aiResult = emptyImages(`${runDir}/images`);
+      }
+
+      return mergeSceneVisuals(narrative, stockBySegment, aiResult);
     },
     (r) => imagesCostUsd(r.metadata.generated),
   );
@@ -507,8 +553,20 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
   // --- 12. Thumbnail covers (hook-scene image + SEO cover text; local, free) ---
   const thumbs = await ledger.stage("thumbnail", async () => {
     log("⑫ Rendering thumbnail covers...");
-    const hookImage =
+    // Prefer a real still image; if every scene is stock footage, grab a frame
+    // from the first clip so the cover still has a real background.
+    let hookImage =
       images.images.find((im) => im.status === "generated" && im.imagePath !== "")?.imagePath ?? "";
+    if (hookImage === "") {
+      const hookClip = images.images.find((im) => (im.videoPath ?? "") !== "")?.videoPath;
+      if (hookClip) {
+        const framePath = `${runDir}/thumbnails/hook-frame.jpg`;
+        const grab = await runFfmpeg(["-y", "-ss", "1", "-i", hookClip, "-frames:v", "1", "-q:v", "3", framePath]);
+        if (grab.ok) {
+          hookImage = framePath;
+        }
+      }
+    }
     const result = await new FfmpegThumbnailProvider({
       ...buildThumbnailContext(profile, run),
       outputDir: `${runDir}/thumbnails`,
@@ -675,6 +733,68 @@ function sceneImagePlan(narrative: NarrativeScript, profile: NicheProfile): Asse
       latencyMs: 0,
     },
   };
+}
+
+/* ------------------------------ stock-video helpers ------------------------------ */
+
+/** A short, keyword-y search phrase for a scene (stock search wants keywords,
+ *  not full sentences). Prefer the visual hint; fall back to the first words of
+ *  the narration, stripped of filler. */
+function stockQueryForSegment(visualHint: string, text: string): string {
+  const base = (visualHint && visualHint.trim() !== "" ? visualHint : text).toLowerCase();
+  const words = base
+    .replace(/[^a-z0-9\s]/gu, " ")
+    .split(/\s+/u)
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+  return words.slice(0, 5).join(" ").trim() || base.split(/\s+/u).slice(0, 4).join(" ");
+}
+
+const STOPWORDS = new Set([
+  "the", "and", "for", "with", "that", "this", "was", "were", "are", "his", "her", "she",
+  "him", "they", "them", "you", "your", "but", "not", "had", "has", "have", "from", "into",
+  "our", "out", "over", "then", "than", "when", "what", "who", "how", "why", "its", "it's",
+]);
+
+/** An empty GeneratedImages shell (used when stock covered every scene). */
+function emptyImages(outputDir: string): GeneratedImages {
+  return {
+    images: [],
+    outputDir,
+    warnings: [],
+    metadata: {
+      provider: "openai", model: "gpt-image-1", size: "", quality: "",
+      requested: 0, generated: 0, totalBytes: 0, latencyMs: 0,
+    },
+  };
+}
+
+/** Merge the stock clips and AI images into one per-scene visual list: each
+ *  segment carries a `videoPath` (stock won) OR an `imagePath` (AI). */
+function mergeSceneVisuals(
+  narrative: NarrativeScript,
+  stockBySegment: ReadonlyMap<string, string>,
+  aiResult: GeneratedImages,
+): GeneratedImages {
+  const aiById = new Map(aiResult.images.map((im) => [im.segmentId, im]));
+  const images: GeneratedImage[] = narrative.segments.map((_, i) => {
+    const segmentId = `seg-${i + 1}`;
+    const clipPath = stockBySegment.get(segmentId);
+    if (clipPath) {
+      return {
+        segmentId, prompt: "stock-footage", imagePath: "", videoPath: clipPath,
+        status: "generated", model: "stock", format: "jpeg", width: 0, height: 0, bytes: 0,
+      };
+    }
+    const ai = aiById.get(segmentId);
+    if (ai) {
+      return ai;
+    }
+    return {
+      segmentId, prompt: "", imagePath: "", status: "failed",
+      model: "none", format: "jpeg", width: 0, height: 0, bytes: 0,
+    };
+  });
+  return { ...aiResult, images };
 }
 
 /* ------------------------------ podcast helpers ------------------------------ */

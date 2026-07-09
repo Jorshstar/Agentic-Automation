@@ -62,6 +62,12 @@ export interface GeneratedImage {
   readonly width: number;
   readonly height: number;
   readonly bytes: number;
+  /**
+   * Optional real stock-video clip for this scene (the waterfall winner). When
+   * set, composition builds the segment from this clip instead of the image;
+   * `imagePath` may be "" in that case.
+   */
+  readonly videoPath?: string;
 }
 
 /** Provider/model/usage recorded for one image-generation run. */

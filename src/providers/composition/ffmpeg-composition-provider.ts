@@ -56,7 +56,8 @@ export class FfmpegCompositionProvider implements CompositionProvider {
 
     const imagesById = new Map<string, GeneratedImage>(
       request.images.images
-        .filter((image) => image.status === "generated" && image.imagePath !== "")
+        // Keep any scene with a usable visual — a real image OR a stock video clip.
+        .filter((image) => image.status === "generated" && (image.imagePath !== "" || (image.videoPath ?? "") !== ""))
         .map((image) => [image.segmentId, image]),
     );
 
@@ -81,10 +82,18 @@ export class FfmpegCompositionProvider implements CompositionProvider {
         warnings.push({ code: "missing-image", message: "No image; using a colour card.", segmentId: segment.segmentId });
       }
 
-      // Fallback ladder: motion clip → STATIC image clip → colour card. A failed
-      // motion effect should degrade to the still image, never straight to black.
+      // Fallback ladder: real stock CLIP → motion image clip → STATIC image clip
+      // → colour card. Each step degrades gracefully, never straight to black.
       let rendered = false;
-      if (image) {
+      if (image?.videoPath) {
+        // Real footage: scale/crop to frame, loop if shorter than the scene, trim
+        // to the narration duration, drop the clip's own audio.
+        rendered = (await runFfmpeg(stockClipArgs(image.videoPath, duration, ctx, clipPath))).ok;
+        if (!rendered) {
+          warnings.push({ code: "clip-failed", message: "Stock clip failed; falling back.", segmentId: segment.segmentId });
+        }
+      }
+      if (!rendered && image && image.imagePath !== "") {
         rendered = (await runFfmpeg(imageClipArgs(image.imagePath, duration, clipIndex, ctx, clipPath))).ok;
         if (!rendered) {
           rendered = (await runFfmpeg(staticImageClipArgs(image.imagePath, duration, ctx, clipPath))).ok;
@@ -305,6 +314,33 @@ function staticImageClipArgs(
     `scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=increase,` +
       `crop=${ctx.width}:${ctx.height},format=yuv420p,fps=${ctx.fps}`,
     "-an",
+    "-r", String(ctx.fps),
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-threads", "2",
+    "-pix_fmt", "yuv420p",
+    "-t", durStr,
+    clipPath,
+  ];
+}
+
+/**
+ * A real stock-footage clip normalized to the scene: loop if the source is
+ * shorter than the narration, scale-crop to fill the vertical frame, trim to the
+ * exact scene duration, force fps, and DROP the clip's own audio (the narration
+ * is the only audio). `-stream_loop -1` before the input repeats it as needed.
+ */
+function stockClipArgs(videoPath: string, duration: number, ctx: CompositionContext, clipPath: string): string[] {
+  const durStr = duration.toString();
+  return [
+    "-y",
+    "-stream_loop", "-1",
+    "-i", videoPath,
+    "-t", durStr,
+    "-an",
+    "-vf",
+    `scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=increase,` +
+      `crop=${ctx.width}:${ctx.height},format=yuv420p,fps=${ctx.fps}`,
     "-r", String(ctx.fps),
     "-c:v", "libx264",
     "-preset", "veryfast",

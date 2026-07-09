@@ -13,6 +13,7 @@ import type { MusicGenerationContext } from "../providers/music-generation/index
 import type { CompositionContext } from "../providers/composition/index.js";
 import type { QaContext } from "../providers/quality-assurance/index.js";
 import type { ThumbnailContext } from "../providers/thumbnail-generation/index.js";
+import type { StockVideoContext } from "../providers/stock-video/index.js";
 import type { Niche } from "../types/index.js";
 
 /**
@@ -45,6 +46,10 @@ export interface RunSettings {
   readonly fps: number;
   readonly videoOutputDir: string;
   readonly thumbnailOutputDir: string;
+  readonly stockOutputDir: string;
+  /** Use real stock footage (Pexels/Pixabay) as the per-scene visual when a good
+   *  vertical clip exists; falls back to the AI image otherwise. */
+  readonly useStockVideo: boolean;
 }
 
 /** Sensible defaults: 60s vertical 1080x1920 YouTube Short, current cheap TTS model. */
@@ -67,6 +72,10 @@ export const DEFAULT_RUN_SETTINGS: RunSettings = {
   fps: 30,
   videoOutputDir: "output/video",
   thumbnailOutputDir: "output/thumbnails",
+  stockOutputDir: "output/stock",
+  // On by default — free, and it only REPLACES a scene when a good clip exists,
+  // otherwise the AI image is used. No key set → silently all-images (no cost).
+  useStockVideo: true,
 };
 
 
@@ -218,6 +227,17 @@ export function buildCompositionContext(
     workDir: `${run.videoOutputDir}/work/${profile.niche}`,
     musicVolume: 0.15,
     kenBurns: true,
+  };
+}
+
+export function buildStockVideoContext(
+  run: RunSettings = DEFAULT_RUN_SETTINGS,
+): StockVideoContext {
+  return {
+    width: run.width,
+    height: run.height,
+    minDurationSeconds: 4,
+    outputDir: run.stockOutputDir,
   };
 }
 
