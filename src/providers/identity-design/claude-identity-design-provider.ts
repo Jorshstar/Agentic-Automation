@@ -21,6 +21,8 @@ import type {
  */
 
 const IDENTITY_PROMPT_ID = "identity.user";
+/** Role + rules, sent as the system instruction. */
+const IDENTITY_SYSTEM_PROMPT_ID = "identity.system";
 
 /** OpenAI TTS voices the designer may pick from. */
 const VOICES = [
@@ -42,6 +44,7 @@ export class ClaudeIdentityDesignProvider implements IdentityDesignProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: IDENTITY_PROMPT_ID,
+      systemPromptId: IDENTITY_SYSTEM_PROMPT_ID,
       variables: {
         instructions: request.instructions,
         voices: VOICES.join(", "),

@@ -34,6 +34,8 @@ import { CAPTION_POSITIONS } from "./types.js";
 
 /** The prompt this provider drives. The TEXT lives in the Prompt Management System. */
 const SCENE_PLAN_PROMPT_ID = "scene-plan.user";
+/** Role + rules, sent as the system instruction. */
+const SCENE_PLAN_SYSTEM_PROMPT_ID = "scene-plan.system";
 
 /** Sensible defaults for the context the upstream plans don't carry. */
 const DEFAULT_SCENE_PLAN_CONTEXT: ScenePlanContext = {
@@ -66,6 +68,7 @@ export class ClaudeScenePlanningProvider implements ScenePlanningProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: SCENE_PLAN_PROMPT_ID,
+      systemPromptId: SCENE_PLAN_SYSTEM_PROMPT_ID,
       variables: {
         segments: mergeSegments(request.narrative, request.visualDirection, request.assetPlan),
         platform: context.platform,

@@ -40,6 +40,8 @@ import { ASSET_GENERATION_METHODS, ASSET_GENERATION_STATUSES } from "./types.js"
 
 /** The prompt this provider drives. The TEXT lives in the Prompt Management System. */
 const ASSET_GENERATION_PROMPT_ID = "asset-generation.user";
+/** Role + rules, sent as the system instruction. */
+const ASSET_GENERATION_SYSTEM_PROMPT_ID = "asset-generation.system";
 
 /** Sensible defaults for the context the AssetPlan doesn't carry (9:16 vertical). */
 const DEFAULT_ASSET_GENERATION_CONTEXT: GeneratedAssetContext = {
@@ -73,6 +75,7 @@ export class ClaudeAssetGenerationProvider implements AssetGenerationProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: ASSET_GENERATION_PROMPT_ID,
+      systemPromptId: ASSET_GENERATION_SYSTEM_PROMPT_ID,
       variables: {
         segments: serializeAssetPlan(request.assetPlan),
         platform: context.platform,

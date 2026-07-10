@@ -31,6 +31,8 @@ import { VISUAL_ASSET_TYPES } from "./types.js";
 
 /** The prompt this provider drives. The TEXT lives in the Prompt Management System. */
 const VISUAL_DIRECTION_PROMPT_ID = "visual-direction.user";
+/** Role + rules, sent as the system instruction. */
+const VISUAL_DIRECTION_SYSTEM_PROMPT_ID = "visual-direction.system";
 
 /** Sensible defaults for the context the narrative timeline doesn't carry. */
 const DEFAULT_VISUAL_DIRECTION_CONTEXT: VisualDirectionContext = {
@@ -64,6 +66,7 @@ export class ClaudeVisualDirectionProvider implements VisualDirectionProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: VISUAL_DIRECTION_PROMPT_ID,
+      systemPromptId: VISUAL_DIRECTION_SYSTEM_PROMPT_ID,
       variables: {
         segments: serializeSegments(request.narrative),
         platform: context.platform,

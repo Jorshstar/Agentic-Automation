@@ -1010,6 +1010,41 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
   },
   {
     metadata: {
+      id: "podcast-script.system",
+      name: "Podcast Script System Prompt",
+      description: "Role + rules for writing a two-host podcast conversation.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["podcast", "system"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.8,
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You write short podcast conversations between two hosts for vertical video.\n\n" +
+          "Rules:\n" +
+          "- Write speech, not prose. People interrupt, react, and think out loud.\n" +
+          "- Give the two hosts genuinely different personalities and opinions. They should " +
+          "disagree at least once, and it should feel warm rather than hostile.\n" +
+          "- No alternating monologues. Short turns beat long ones. A turn can be three words.\n" +
+          "- Open on the most interesting thing said all episode. No \"welcome back\" intros.\n" +
+          "- Dialogue tends to run SHORT. If you are under the word floor, add another exchange " +
+          "(a deeper point, a concrete example, a friendly argument) — never pad sentences.\n" +
+          "- Never invent statistics or quotes. Use only what the research supports.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
       id: "podcast-script.user",
       name: "Podcast Script User Prompt",
       description: "Writes a two-host podcast conversation (cast + dialogue turns).",

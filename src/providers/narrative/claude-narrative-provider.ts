@@ -28,6 +28,8 @@ import type {
 
 /** The prompt this provider drives. The TEXT lives in the Prompt Management System. */
 const NARRATIVE_PROMPT_ID = "narrative.user";
+/** Role + rules (the scriptwriter persona), sent as the system instruction. */
+const NARRATIVE_SYSTEM_PROMPT_ID = "narrative.system";
 
 /** Sensible defaults for the production context the ContentPlan doesn't carry. */
 const DEFAULT_NARRATIVE_CONTEXT: NarrativeContext = {
@@ -61,6 +63,7 @@ export class ClaudeNarrativeProvider implements NarrativeProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: NARRATIVE_PROMPT_ID,
+      systemPromptId: NARRATIVE_SYSTEM_PROMPT_ID,
       variables: {
         hook: plan.hook,
         coreMessage: plan.coreMessage,

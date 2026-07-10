@@ -13,6 +13,8 @@ import type {
  * No Anthropic SDK, no PromptManager, no HTTP. Defensive JSON parsing.
  */
 const TOPIC_PROMPT_ID = "topic-idea.user";
+/** Role + rules, sent as the system instruction. */
+const TOPIC_SYSTEM_PROMPT_ID = "topic-idea.system";
 
 export class ClaudeTopicGenerationProvider implements TopicGenerationProvider {
   readonly name = "claude-topic-generation-provider";
@@ -22,6 +24,7 @@ export class ClaudeTopicGenerationProvider implements TopicGenerationProvider {
   async generate(request: TopicGenerationRequest): Promise<GeneratedTopic> {
     const generateRequest: AIGenerateRequest = {
       promptId: TOPIC_PROMPT_ID,
+      systemPromptId: TOPIC_SYSTEM_PROMPT_ID,
       variables: {
         niche: request.niche,
         audience: request.audience,

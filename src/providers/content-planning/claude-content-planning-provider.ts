@@ -27,6 +27,8 @@ import type {
 
 /** The prompt this provider drives. The TEXT lives in the Prompt Management System. */
 const CONTENT_PLAN_PROMPT_ID = "content-plan.user";
+/** Role + rules, sent as the system instruction. */
+const CONTENT_PLAN_SYSTEM_PROMPT_ID = "content-plan.system";
 
 /** Sensible defaults for the production context the request doesn't carry. */
 const DEFAULT_CONTENT_PLAN_CONTEXT: ContentPlanContext = {
@@ -58,6 +60,7 @@ export class ClaudeContentPlanningProvider implements ContentPlanningProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: CONTENT_PLAN_PROMPT_ID,
+      systemPromptId: CONTENT_PLAN_SYSTEM_PROMPT_ID,
       variables: {
         topic: request.topic,
         researchSummary: request.research.summary,

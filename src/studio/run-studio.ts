@@ -548,6 +548,7 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
         audience: profile.audience,
         keywords,
         durationSeconds: video.durationSeconds,
+        platform: run.platformLabel,
       });
       log(`   YT: "${pack.youtube.title}"`);
       return pack;

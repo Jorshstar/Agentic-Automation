@@ -33,6 +33,8 @@ import { ASSET_PROVIDERS } from "./types.js";
 
 /** The prompt this provider drives. The TEXT lives in the Prompt Management System. */
 const ASSET_PLAN_PROMPT_ID = "asset-plan.user";
+/** Role + rules, sent as the system instruction. */
+const ASSET_PLAN_SYSTEM_PROMPT_ID = "asset-plan.system";
 
 /** Sensible defaults for the context the visual direction plan doesn't carry. */
 const DEFAULT_ASSET_PLAN_CONTEXT: AssetPlanContext = {
@@ -64,6 +66,7 @@ export class ClaudeAssetPlanningProvider implements AssetPlanningProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: ASSET_PLAN_PROMPT_ID,
+      systemPromptId: ASSET_PLAN_SYSTEM_PROMPT_ID,
       variables: {
         segments: serializeSegments(request.visualDirection),
         platform: context.platform,

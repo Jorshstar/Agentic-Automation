@@ -21,6 +21,8 @@ import type {
 
 /** The prompt this provider drives. The TEXT lives in the Prompt Management System. */
 const SEO_PROMPT_ID = "seo.user";
+/** Role + rules, sent as the system instruction. */
+const SEO_SYSTEM_PROMPT_ID = "seo.system";
 
 export class ClaudeSeoProvider implements SeoProvider {
   readonly name = "claude-seo-provider";
@@ -32,6 +34,7 @@ export class ClaudeSeoProvider implements SeoProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: SEO_PROMPT_ID,
+      systemPromptId: SEO_SYSTEM_PROMPT_ID,
       variables: {
         topic: request.topic,
         hook: request.hook,
@@ -41,6 +44,7 @@ export class ClaudeSeoProvider implements SeoProvider {
         audience: request.audience,
         keywords: request.keywords.join(", "),
         durationSeconds: Math.round(request.durationSeconds),
+        platform: request.platform ?? "YouTube Shorts and TikTok",
       },
       expectedOutput: { format: "json", description: "a YouTube + TikTok upload kit" },
       maxTokens: 900,

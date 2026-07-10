@@ -17,6 +17,8 @@ import type {
  */
 
 const PODCAST_PROMPT_ID = "podcast-script.user";
+/** Role + rules (how two hosts actually talk), sent as the system instruction. */
+const PODCAST_SYSTEM_PROMPT_ID = "podcast-script.system";
 const VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"];
 
 export interface PodcastScriptProvider {
@@ -34,6 +36,7 @@ export class ClaudePodcastScriptProvider implements PodcastScriptProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: PODCAST_PROMPT_ID,
+      systemPromptId: PODCAST_SYSTEM_PROMPT_ID,
       variables: {
         topic: request.topic,
         researchSummary: request.research.summary,

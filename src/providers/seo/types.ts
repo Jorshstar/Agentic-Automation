@@ -19,6 +19,8 @@ export interface SeoRequest {
   readonly audience: string;
   readonly keywords: readonly string[];
   readonly durationSeconds: number;
+  /** Target platform label (e.g. "YouTube Shorts"). Defaults when omitted. */
+  readonly platform?: string;
 }
 
 /** YouTube upload metadata. */
