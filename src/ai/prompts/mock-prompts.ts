@@ -134,11 +134,10 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
         template:
           "You write narration for TRUE historical horror on {{platform}}. The story is real. " +
           "That is the whole point — it frightens because it happened.\n\n" +
-          "OPENING RULE: by DEFAULT, open with \"Did you know that...\" followed by the single most " +
-          "shocking TRUE fact of the story — real place, real year, real people. Use this opening " +
-          "most of the time. Only deviate when a different hook is clearly stronger, and even then " +
-          "it must lead with a shocking verified fact in the first sentence. Name the place, year, " +
-          "and people within the first two sentences.\n\n" +
+          "OPENING RULE — MANDATORY: the FIRST words of the narration must be exactly " +
+          "\"Did you know that\" followed by the single most shocking TRUE fact of the story — real " +
+          "place, real year, real people. No other opening is allowed. Name the place, year, and " +
+          "people within the first two sentences.\n\n" +
           "Rules:\n" +
           "- NEVER invent a detail. No invented dialogue, names, dates, or deaths. Every fact you " +
           "narrate must appear in the research you were given.\n" +
@@ -204,6 +203,50 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "rather than storytelling.\n\n" +
           "You have a live web search tool. Use it. Verify names, dates, and places before you " +
           "state them. If you cannot verify a detail, mark it as unverified or leave it out.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "verify-research.user",
+      name: "Research Fact-Checker Prompt",
+      description: "Independently verifies a research package's claims via web search.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["research", "verification"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.2,
+      requiredVariables: ["eventName", "shockingFact", "claims"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are an independent fact-checker. Another researcher produced claims about a " +
+          "historical event. Your job is to VERIFY them against the live web — assume nothing is " +
+          "true until a reputable source confirms it. Be skeptical: this feeds a video that must " +
+          "never state a falsehood.\n\n" +
+          "EVENT: {{eventName}}\n\n" +
+          "HEADLINE CLAIM (the video opens on this — check it hardest):\n{{shockingFact}}\n\n" +
+          "CLAIMS TO CHECK:\n{{claims}}\n\n" +
+          "Search the web to confirm or refute each claim. Then return ONLY valid JSON (no fences):\n" +
+          "{\n" +
+          "  \"headlineVerdict\": string,\n" +
+          "  \"verdicts\": [ { \"claim\": string, \"status\": string, \"note\": string } ],\n" +
+          "  \"overall\": string\n" +
+          "}\n\n" +
+          "Rules: `status` and `headlineVerdict` are one of: confirmed (a reputable source backs " +
+          "it), unconfirmed (no clear source found), contradicted (sources say otherwise). `note` " +
+          "is a short reason, naming the source when possible. `overall` is \"pass\" if the " +
+          "headline and most claims are confirmed and NONE are contradicted, otherwise \"fail\". " +
+          "Do not invent sources. If you cannot verify with a real search result, say unconfirmed.",
         createdAt: ISO,
       },
     ],

@@ -44,6 +44,7 @@ import type { GeneratedVoiceover, GeneratedVoiceSegment } from "../providers/voi
 import type { GeneratedImage, GeneratedImages } from "../providers/image-generation/index.js";
 import { PexelsPixabayStockVideoProvider } from "../providers/stock-video/index.js";
 import { ClaudeVoiceCastingProvider } from "../providers/voice-casting/index.js";
+import { ClaudeResearchVerificationProvider } from "../providers/research-verification/index.js";
 import { runFfmpeg } from "../lib/media.js";
 import type { VideoFormat } from "./formats.js";
 import { FfmpegThumbnailProvider } from "../providers/thumbnail-generation/index.js";
@@ -282,6 +283,32 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
     await ledger.setTopic(title);
   }
 
+  // --- 2b. FACT-CHECK (historical only) — an independent agent re-verifies the
+  //         research before we spend anything generating from it. Contradicted
+  //         claims are dropped so the narrator can never state them as fact. ---
+  let verifiedPkg = pkg;
+  if (historical && pkg) {
+    const verification = await ledger.stage(
+      "verify",
+      async () => {
+        log("②ᵇ Fact-checking the research...");
+        const result = await new ClaudeResearchVerificationProvider(kernel).verify(pkg);
+        log(`   headline: ${result.headlineVerdict}; overall: ${result.overall}; ${result.contradicted.length} claim(s) contradicted (${result.webSearchCount} searches).`);
+        return result;
+      },
+      (r) => webSearchCostUsd(r.webSearchCount) + claudeCostUsd({ inputTokens: r.tokenUsage.inputTokens, outputTokens: r.tokenUsage.outputTokens }),
+    );
+    collect(warnings, verification.warnings.map((w) => `verify: ${w}`));
+    if (verification.overall === "fail") {
+      warnings.push(`verify: fact-check FAILED (headline ${verification.headlineVerdict}, ${verification.contradicted.length} contradicted) — review this video.`);
+    }
+    // Strip contradicted claims from the package the script is built from.
+    if (verification.contradicted.length > 0) {
+      const bad = new Set(verification.contradicted);
+      verifiedPkg = { ...pkg, claims: pkg.claims.filter((c) => !bad.has(c.claim)) };
+    }
+  }
+
   // --- 3. Content plan ---
   const contentPlan = await ledger.stage(
     "content-plan",
@@ -292,7 +319,7 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
         // Historical runs carry the structured package forward as briefing text,
         // so the planner (and then the narrator) sees the shocking fact, the
         // official explanation, and exactly what remains unexplained.
-        research: historical && pkg ? { ...research, summary: historicalBriefing(pkg) } : research,
+        research: historical && verifiedPkg ? { ...research, summary: historicalBriefing(verifiedPkg) } : research,
       });
     },
     (r) => claudeCostUsd(r.metadata.tokenUsage),
@@ -482,6 +509,32 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
             // Neither library had this scene — OpenAI will paint it below.
           }
         }
+        // SECOND PASS — keep it real: for any scene still uncovered, retry with a
+        // BROADER, more generic query (and a niche atmosphere term) before paying
+        // OpenAI. Real stock is strongly preferred; AI images are the last resort.
+        for (const [i, segment] of narrative.segments.entries()) {
+          const segmentId = `seg-${i + 1}`;
+          if (stockClips.has(segmentId) || stockPhotos.has(segmentId)) {
+            continue;
+          }
+          const neededSeconds = Math.max(2, Math.round(segment.endSecond - segment.startSecond));
+          for (const broad of broadenedQueries(segment.stockKeyword ?? "", segment.text, profile)) {
+            const req = { segmentId, query: broad, neededSeconds };
+            const photo = await stock.findPhoto(req);
+            collect(warnings, realErrors(photo.warnings));
+            if (photo.photo) {
+              stockPhotos.set(segmentId, photo.photo.photoPath);
+              break;
+            }
+            const clip = await stock.find(req);
+            collect(warnings, realErrors(clip.warnings));
+            if (clip.clip) {
+              stockClips.set(segmentId, clip.clip.clipPath);
+              break;
+            }
+          }
+        }
+
         const covered = stockClips.size + stockPhotos.size;
         log(`   ${stockClips.size} real clips, ${stockPhotos.size} real photos, ${narrative.segments.length - covered} need AI images.`);
       }
@@ -901,6 +954,26 @@ function stockQueryForSegment(visualHint: string, text: string): string {
     .split(/\s+/u)
     .filter((w) => w.length > 2 && !STOPWORDS.has(w));
   return words.slice(0, 5).join(" ").trim() || base.split(/\s+/u).slice(0, 4).join(" ");
+}
+
+/**
+ * Progressively broader queries for a scene that missed on its exact keyword —
+ * so we exhaust FREE stock before paying OpenAI. First the two most important
+ * words, then a generic atmosphere term drawn from the niche's look.
+ */
+function broadenedQueries(
+  stockKeyword: string,
+  text: string,
+  profile: NicheProfile,
+): readonly string[] {
+  const base = stockQueryForSegment(stockKeyword || "", text);
+  const twoWords = base.split(/\s+/u).slice(0, 2).join(" ");
+  const oneWord = base.split(/\s+/u)[0] ?? "";
+  // A niche mood word so scary scenes still get something atmospheric.
+  const mood = profile.colorMood.split(/[\s,]+/u).filter((w) => w.length > 3)[0] ?? "cinematic";
+  const atmosphere =
+    profile.niche === "scary-stories" ? "dark abandoned atmospheric" : `${mood} background`;
+  return [...new Set([twoWords, oneWord, atmosphere].filter((q) => q.trim() !== ""))];
 }
 
 const STOPWORDS = new Set([

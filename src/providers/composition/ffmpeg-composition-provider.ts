@@ -249,18 +249,7 @@ function imageClipArgs(
   const fps = ctx.fps;
   const motion = MOTIONS[index % MOTIONS.length] ?? "pan-up";
 
-  const shared: readonly string[] = [
-    "-an",
-    "-r", String(fps),
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    // Cap encoder threads — x264 otherwise reads the HOST core count (not the
-    // container limit) and spawns dozens of threads, exhausting memory (OOM).
-    "-threads", "2",
-    "-pix_fmt", "yuv420p",
-    "-t", durStr,
-    clipPath,
-  ];
+  const shared = cfrOutputArgs(ctx, durStr, clipPath);
 
   if (motion === "zoom-in" || motion === "zoom-out") {
     // zoompan needs ONE input frame; it generates `d` output frames itself.
@@ -273,7 +262,7 @@ function imageClipArgs(
       `scale=${ctx.width * 2}:${ctx.height * 2}:force_original_aspect_ratio=increase,` +
       `crop=${ctx.width * 2}:${ctx.height * 2},` +
       `zoompan=z='${zoomExpr}':d=${frames}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':` +
-      `s=${ctx.width}x${ctx.height}:fps=${fps},format=yuv420p`;
+      `s=${ctx.width}x${ctx.height}:fps=${fps},${CFR_VF_TAIL}`;
     return ["-y", "-i", imagePath, "-vf", vf, "-frames:v", String(frames), ...shared];
   }
 
@@ -286,7 +275,7 @@ function imageClipArgs(
   const yExpr = motion === "pan-down" ? `${ySlack}*${ease}` : `${ySlack}*(1-${ease})`;
   const vf =
     `scale=${coverW}:${coverH}:force_original_aspect_ratio=increase,crop=${coverW}:${coverH},` +
-    `crop=${ctx.width}:${ctx.height}:x=${xSlack}:y='${yExpr}',format=yuv420p,fps=${fps}`;
+    `crop=${ctx.width}:${ctx.height}:x=${xSlack}:y='${yExpr}',fps=${fps},${CFR_VF_TAIL}`;
 
   return [
     "-y",
@@ -296,6 +285,33 @@ function imageClipArgs(
     "-i", imagePath,
     "-vf", vf,
     ...shared,
+  ];
+}
+
+/**
+ * Every intermediate clip MUST leave here as identical constant-frame-rate video
+ * — same fps, same SAR, same timebase, PTS reset to 0. Mixed-fps stock sources
+ * (25/60/59.94) otherwise stitch into stuttering, "skipping" output when the
+ * clips are concatenated. `CFR_VF_TAIL` ends every filter chain; `cfrOutputArgs`
+ * ends every arg list.
+ */
+const CFR_VF_TAIL = "format=yuv420p,setsar=1,setpts=PTS-STARTPTS";
+
+function cfrOutputArgs(ctx: CompositionContext, durStr: string, clipPath: string): string[] {
+  return [
+    "-an",
+    "-r", String(ctx.fps),
+    "-vsync", "cfr",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    // Cap encoder threads — x264 otherwise reads the HOST core count (not the
+    // container limit) and spawns dozens of threads, exhausting memory (OOM).
+    "-threads", "2",
+    "-pix_fmt", "yuv420p",
+    // Identical timebase on every clip so the concat demuxer stitches cleanly.
+    "-video_track_timescale", "30000",
+    "-t", durStr,
+    clipPath,
   ];
 }
 
@@ -315,28 +331,18 @@ function staticImageClipArgs(
     "-i", imagePath,
     "-vf",
     `scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=increase,` +
-      `crop=${ctx.width}:${ctx.height},format=yuv420p,fps=${ctx.fps}`,
-    "-an",
-    "-r", String(ctx.fps),
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-threads", "2",
-    "-pix_fmt", "yuv420p",
-    "-t", durStr,
-    clipPath,
+      `crop=${ctx.width}:${ctx.height},fps=${ctx.fps},${CFR_VF_TAIL}`,
+    ...cfrOutputArgs(ctx, durStr, clipPath),
   ];
 }
 
-/** How far a short clip may be slowed to fill a scene before it looks like slow
- *  motion. Beyond this we loop the remainder (a seam, but rare). */
-const MAX_STOCK_STRETCH = 2.2;
-
 /**
- * A real stock-footage clip normalized to the scene. Scale-crop to fill the
- * vertical frame, DROP the clip's audio, force fps, trim to the exact scene
- * length. The important part: when the source is SHORTER than the scene it is
- * slowed (setpts) to fill smoothly instead of hard-looping — no jump-cut back to
- * frame 1. Only a clip shorter than scene/MAX_STOCK_STRETCH still loops.
+ * A real stock-footage clip normalized to the scene. The FIRST filter is
+ * `fps` — stock sources come at 25/50/60/59.94 fps, and converting to a single
+ * constant rate up front is what stops the concatenated video from stuttering.
+ * Then scale-crop to fill the vertical frame and reset SAR/PTS (CFR_VF_TAIL).
+ * A clip shorter than the scene is cleanly looped (`-stream_loop`) rather than
+ * slowed — slow-motion of a low-fps source judders worse than a single loop.
  */
 function stockClipArgs(
   videoPath: string,
@@ -346,33 +352,19 @@ function stockClipArgs(
   clipPath: string,
 ): string[] {
   const durStr = duration.toString();
-  const needsFill = sourceSeconds > 0 && sourceSeconds < duration;
-  // Slow factor to stretch source→scene, capped so it never crawls.
-  const stretch = needsFill ? Math.min(duration / sourceSeconds, MAX_STOCK_STRETCH) : 1;
-  // Loop only if even max-stretch can't fill the scene.
-  const loop = needsFill && duration / sourceSeconds > MAX_STOCK_STRETCH;
+  const loop = sourceSeconds > 0 && sourceSeconds < duration;
 
-  const filters = [
-    `scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=increase`,
-    `crop=${ctx.width}:${ctx.height}`,
-    ...(stretch > 1.001 ? [`setpts=${stretch.toFixed(4)}*PTS`] : []),
-    "format=yuv420p",
-    `fps=${ctx.fps}`,
-  ].join(",");
+  const filters =
+    `fps=${ctx.fps},` +
+    `scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=increase,` +
+    `crop=${ctx.width}:${ctx.height},${CFR_VF_TAIL}`;
 
   return [
     "-y",
     ...(loop ? ["-stream_loop", "-1"] : []),
     "-i", videoPath,
-    "-an",
     "-vf", filters,
-    "-r", String(ctx.fps),
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-threads", "2",
-    "-pix_fmt", "yuv420p",
-    "-t", durStr,
-    clipPath,
+    ...cfrOutputArgs(ctx, durStr, clipPath),
   ];
 }
 
@@ -384,14 +376,8 @@ function colorClipArgs(duration: number, ctx: CompositionContext, clipPath: stri
     "-f", "lavfi",
     "-i", `color=c=black:s=${ctx.width}x${ctx.height}:r=${ctx.fps}`,
     "-t", durStr,
-    "-vf", "format=yuv420p",
-    "-r", String(ctx.fps),
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-threads", "2",
-    "-pix_fmt", "yuv420p",
-    "-t", durStr,
-    clipPath,
+    "-vf", CFR_VF_TAIL,
+    ...cfrOutputArgs(ctx, durStr, clipPath),
   ];
 }
 
@@ -423,7 +409,9 @@ function finalArgs(opts: {
 }): string[] {
   const { listPath, voicePath, musicPath, captionsPath, ctx, totalStr } = opts;
 
-  const args: string[] = ["-y", "-f", "concat", "-safe", "0", "-i", listPath];
+  // `+genpts` rebuilds any missing timestamps at the concat boundary; the clips
+  // are already uniform CFR, so the stitch is seamless.
+  const args: string[] = ["-y", "-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", listPath];
   let voiceIdx = -1;
   let musicIdx = -1;
   let next = 1;
@@ -484,12 +472,14 @@ function finalArgs(opts: {
     "-bufsize", "10400k",
     "-profile:v", "high",
     "-pix_fmt", "yuv420p",
-    // Let players start before the whole file downloads.
-    "-movflags", "+faststart",
+    // Force constant frame rate out — no dropped/duplicated frames at boundaries.
+    "-vsync", "cfr",
+    "-video_track_timescale", "30000",
   );
   if (audioMap) {
     args.push("-c:a", "aac", "-b:a", "192k");
   }
+  // faststart lets players begin before the full download (once, at the end).
   args.push("-movflags", "+faststart", "-t", totalStr, ctx.outputPath);
   return args;
 }
