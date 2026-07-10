@@ -459,6 +459,12 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
       // the edit breathes like a documentary instead of being all motion or all
       // stills. If the preferred medium misses, the other is tried, and only then
       // do we pay OpenAI. Cheaper than all-images, and it all reads as real.
+      //
+      // SCARY EXCEPTION: free stock PHOTOS are calm and generic — useless for
+      // horror. So scary skips stock photos entirely: it uses real stock VIDEO
+      // where it fits (motion) and a dark, scene-matched AI HORROR image for the
+      // rest. That is the only way to get visuals that are both scary AND aligned.
+      const useStockPhotos = niche !== "scary-stories";
       const plan = sceneImagePlan(narrative, profile);
       const stockClips = new Map<string, string>();
       const stockPhotos = new Map<string, string>();
@@ -493,6 +499,9 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
             return false;
           };
           const tryPhoto = async (): Promise<boolean> => {
+            if (!useStockPhotos) {
+              return false; // scary: no calm stock stills — an AI horror image instead
+            }
             const res = await stock.findPhoto(request);
             collect(warnings, realErrors(res.warnings));
             if (res.photo) {
@@ -502,11 +511,15 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
             return false;
           };
 
-          const found = wantsVideoFirst
-            ? (await tryVideo()) || (await tryPhoto())
-            : (await tryPhoto()) || (await tryVideo());
+          // Scary: try only VIDEO from stock (the still scenes become AI horror
+          // images). Other niches: alternate video/photo for documentary rhythm.
+          const found = !useStockPhotos
+            ? await tryVideo()
+            : wantsVideoFirst
+              ? (await tryVideo()) || (await tryPhoto())
+              : (await tryPhoto()) || (await tryVideo());
           if (!found) {
-            // Neither library had this scene — OpenAI will paint it below.
+            // Nothing real yet — the broadened pass or OpenAI covers it below.
           }
         }
         // SECOND PASS — keep it real: for any scene still uncovered, retry with a
@@ -520,11 +533,13 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
           const neededSeconds = Math.max(2, Math.round(segment.endSecond - segment.startSecond));
           for (const broad of broadenedQueries(segment.stockKeyword ?? "", segment.text, profile)) {
             const req = { segmentId, query: broad, neededSeconds };
-            const photo = await stock.findPhoto(req);
-            collect(warnings, realErrors(photo.warnings));
-            if (photo.photo) {
-              stockPhotos.set(segmentId, photo.photo.photoPath);
-              break;
+            if (useStockPhotos) {
+              const photo = await stock.findPhoto(req);
+              collect(warnings, realErrors(photo.warnings));
+              if (photo.photo) {
+                stockPhotos.set(segmentId, photo.photo.photoPath);
+                break;
+              }
             }
             const clip = await stock.find(req);
             collect(warnings, realErrors(clip.warnings));

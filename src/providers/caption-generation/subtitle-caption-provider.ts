@@ -67,25 +67,17 @@ export class SubtitleCaptionProvider implements CaptionGenerationProvider {
         continue;
       }
 
-      // One cue per SENTENCE — never split a sentence mid-phrase. Long sentences
-      // stay whole and wrap onto two lines in place (movie-style).
-      const sentences = splitSentences(text);
-      const weights = sentences.map((sentence) => Math.max(sentence.length, 1));
-      const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
-
-      let cursor = segment.actualStartSecond;
-      sentences.forEach((sentence, i) => {
-        const isLast = i === sentences.length - 1;
-        const share = (weights[i] ?? 1) / totalWeight;
-        const end = isLast ? segment.actualEndSecond : cursor + share * window;
-        cues.push({
-          index: ++cueIndex,
-          segmentId: segment.segmentId,
-          startSecond: round3(cursor),
-          endSecond: round3(end),
-          text: sentence,
-        });
-        cursor = end;
+      // ONE cue per SEGMENT, spanning that segment's EXACT measured audio window.
+      // This is what actually keeps captions in sync with the voice: each segment
+      // was synthesized and measured on its own, so its [start,end] is real. The
+      // old per-sentence split guessed sentence timing by character length and
+      // drifted. Segments are ~one sentence now, so the caption stays short.
+      cues.push({
+        index: ++cueIndex,
+        segmentId: segment.segmentId,
+        startSecond: round3(segment.actualStartSecond),
+        endSecond: round3(segment.actualEndSecond),
+        text,
       });
     }
 

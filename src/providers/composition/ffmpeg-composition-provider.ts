@@ -73,7 +73,11 @@ export class FfmpegCompositionProvider implements CompositionProvider {
         continue;
       }
 
-      const duration = Math.max(0.4, round3(segment.actualDurationSeconds));
+      // Snap the scene length to a WHOLE number of frames. An off-grid duration
+      // (e.g. 9.12s = 273.6 frames) makes -vsync cfr duplicate/drop a frame at the
+      // concat boundary — visible micro-stutter. Integer frames concat cleanly.
+      const rawDuration = Math.max(0.4, segment.actualDurationSeconds);
+      const duration = Math.round(rawDuration * ctx.fps) / ctx.fps;
       const clipName = `clip-${clipIndex}.mp4`;
       const clipPath = join(ctx.workDir, clipName);
       const image = imagesById.get(segment.segmentId);

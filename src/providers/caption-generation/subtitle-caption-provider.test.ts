@@ -53,26 +53,38 @@ async function makeProvider(overrides: Partial<CaptionContext>): Promise<Subtitl
 }
 
 describe("SubtitleCaptionProvider", () => {
-  it("makes ONE cue per sentence and never splits a sentence", async () => {
+  it("makes exactly ONE cue per segment spanning its measured window", async () => {
     const provider = await makeProvider({});
     const result = await provider.generate({
-      voiceover: voiceover("The house was empty. So who turned off the lights upstairs?", 10),
+      voiceover: voiceover("The house was empty and the lights were on.", 10),
+    });
+
+    // One segment → one cue → perfectly aligned to that segment's real audio.
+    expect(result.cues.length).toBe(1);
+    expect(result.cues[0]?.text).toBe("The house was empty and the lights were on.");
+    expect(result.cues[0]?.startSecond).toBe(0);
+    expect(result.cues[0]?.endSecond).toBe(10);
+  });
+
+  it("times each segment's cue to that segment's exact window", async () => {
+    const provider = await makeProvider({});
+    const vo = voiceover("First scene.", 4);
+    const result = await provider.generate({
+      voiceover: {
+        ...vo,
+        segments: [
+          { ...vo.segments[0]!, segmentId: "seg-1", text: "First scene.", actualStartSecond: 0, actualEndSecond: 4, actualDurationSeconds: 4 },
+          { ...vo.segments[0]!, segmentId: "seg-2", text: "Second scene.", actualStartSecond: 4, actualEndSecond: 9, actualDurationSeconds: 5 },
+        ],
+        totalDurationSeconds: 9,
+      },
     });
 
     expect(result.cues.length).toBe(2);
-    expect(result.cues[0]?.text).toBe("The house was empty.");
-    expect(result.cues[1]?.text).toBe("So who turned off the lights upstairs?");
-  });
-
-  it("keeps cues contiguous inside the segment's real window", async () => {
-    const provider = await makeProvider({});
-    const result = await provider.generate({
-      voiceover: voiceover("First sentence here. Second sentence follows!", 8),
-    });
-
     expect(result.cues[0]?.startSecond).toBe(0);
-    expect(result.cues[1]?.startSecond).toBe(result.cues[0]?.endSecond);
-    expect(result.cues[result.cues.length - 1]?.endSecond).toBe(8);
+    expect(result.cues[0]?.endSecond).toBe(4);
+    expect(result.cues[1]?.startSecond).toBe(4);
+    expect(result.cues[1]?.endSecond).toBe(9);
   });
 
   it("karaoke mode adds \\k word timing to the ASS but keeps the SRT plain", async () => {

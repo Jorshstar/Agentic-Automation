@@ -639,10 +639,11 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "continuous timeline starting at 0 and ending as close as possible to " +
           "{{targetDurationSeconds}} seconds (no gaps, no overlaps). Remember the hard word limit " +
           "above ({{minWords}}-{{maxWords}} words total).\n\n" +
-          "IMPORTANT — keep each segment SHORT: 1-2 sentences, roughly 6-10 seconds each. Aim for " +
-          "{{minSegments}}-{{maxSegments}} segments total. Short segments keep the captions in sync " +
-          "with the voice and let the visuals change often. Split a long thought into two segments " +
-          "rather than writing one long one.\n\n" +
+          "IMPORTANT — ONE sentence per segment, roughly 4-6 seconds of speech each. Aim for " +
+          "{{minSegments}}-{{maxSegments}} segments total. Each segment becomes ONE on-screen " +
+          "caption and ONE visual, so a segment must be a single complete sentence — never two " +
+          "sentences, never a fragment. This is what keeps the captions and visuals locked to the " +
+          "voice.\n\n" +
           "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
           "{\n" +
           "  \"hook\": string,\n" +
