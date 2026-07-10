@@ -16,6 +16,7 @@ import {
   buildQaContext,
   buildThumbnailContext,
   buildStockVideoContext,
+  wordsPerSecond,
 } from "../config/niche-context.js";
 import type { RunSettings } from "../config/niche-context.js";
 import { claudeCostUsd, imagesCostUsd, ttsCostUsd, webSearchCostUsd } from "../config/pricing.js";
@@ -42,6 +43,7 @@ import type { PodcastCastMember, PodcastTurn } from "../providers/podcast-script
 import type { GeneratedVoiceover, GeneratedVoiceSegment } from "../providers/voice-generation/index.js";
 import type { GeneratedImage, GeneratedImages } from "../providers/image-generation/index.js";
 import { PexelsPixabayStockVideoProvider } from "../providers/stock-video/index.js";
+import { ClaudeVoiceCastingProvider } from "../providers/voice-casting/index.js";
 import { runFfmpeg } from "../lib/media.js";
 import type { VideoFormat } from "./formats.js";
 import { FfmpegThumbnailProvider } from "../providers/thumbnail-generation/index.js";
@@ -118,24 +120,6 @@ export interface StudioResult {
 
 /** OpenAI TTS speaks ~2.3 words/sec at speed 1.0 (measured across the niche voices). */
 const WORDS_PER_SEC = 2.3;
-
-/**
- * Measured speaking rates by pacing. A single global rate was wrong: a slow,
- * ominous onyx delivery runs ~1.9 w/s, so a "157 word" script measured 83s and
- * had to be sped up 1.27x — destroying the very delivery the niche asked for.
- * Budget the words for the pace the voice will actually speak at.
- */
-function wordsPerSecond(pacing: NicheProfile["pacing"]): number {
-  switch (pacing) {
-    case "slow":
-      return 1.95;
-    case "fast":
-      return 2.55;
-    case "medium":
-    default:
-      return WORDS_PER_SEC;
-  }
-}
 
 /** Total words spoken across all narration segments. */
 function countNarrationWords(narrative: NarrativeScript): number {
@@ -443,46 +427,72 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
         };
       }
 
-      // WATERFALL: try real stock footage per scene (Pexels → Pixabay), and only
-      // pay for an AI image on the scenes stock couldn't cover. Real motion where
-      // it fits, bespoke image where it doesn't — and cheaper than all-images.
+      // MIXED-MEDIA WATERFALL. Every scene wants something REAL. Scenes alternate
+      // which medium they ask for first — moving footage, then a photograph — so
+      // the edit breathes like a documentary instead of being all motion or all
+      // stills. If the preferred medium misses, the other is tried, and only then
+      // do we pay OpenAI. Cheaper than all-images, and it all reads as real.
       const plan = sceneImagePlan(narrative, profile);
-      const stockBySegment = new Map<string, string>();
+      const stockClips = new Map<string, string>();
+      const stockPhotos = new Map<string, string>();
       if (run.useStockVideo) {
-        log(`⑤ Sourcing real stock footage for ${narrative.segments.length} scenes...`);
+        log(`⑤ Sourcing real footage + photos for ${narrative.segments.length} scenes...`);
         const stock = new PexelsPixabayStockVideoProvider({
           ...buildStockVideoContext(run),
           outputDir: `${runDir}/stock`,
         });
+        const realErrors = (ws: readonly { code: string; message: string }[]): string[] =>
+          ws.filter((w) => w.code === "search-failed" || w.code === "download-failed")
+            .map((w) => `stock:${w.code} ${w.message}`);
+
         for (const [i, segment] of narrative.segments.entries()) {
           const segmentId = `seg-${i + 1}`;
-          const res = await stock.find({
-            segmentId,
-            // Prefer the AI's purpose-built generic stock keyword; fall back to
-            // keyword-stripping the visual hint / narration for older scripts.
-            query: segment.stockKeyword && segment.stockKeyword.trim() !== ""
-              ? segment.stockKeyword
-              : stockQueryForSegment(segment.visualHint, segment.text),
-            neededSeconds: Math.max(2, Math.round(segment.endSecond - segment.startSecond)),
-          });
-          if (res.clip) {
-            stockBySegment.set(segmentId, res.clip.clipPath);
+          const query = segment.stockKeyword && segment.stockKeyword.trim() !== ""
+            ? segment.stockKeyword
+            : stockQueryForSegment(segment.visualHint, segment.text);
+          const neededSeconds = Math.max(2, Math.round(segment.endSecond - segment.startSecond));
+          const request = { segmentId, query, neededSeconds };
+
+          // Even scenes open on motion, odd scenes on a still — then swap if the
+          // preferred medium has nothing.
+          const wantsVideoFirst = i % 2 === 0;
+          const tryVideo = async (): Promise<boolean> => {
+            const res = await stock.find(request);
+            collect(warnings, realErrors(res.warnings));
+            if (res.clip) {
+              stockClips.set(segmentId, res.clip.clipPath);
+              return true;
+            }
+            return false;
+          };
+          const tryPhoto = async (): Promise<boolean> => {
+            const res = await stock.findPhoto(request);
+            collect(warnings, realErrors(res.warnings));
+            if (res.photo) {
+              stockPhotos.set(segmentId, res.photo.photoPath);
+              return true;
+            }
+            return false;
+          };
+
+          const found = wantsVideoFirst
+            ? (await tryVideo()) || (await tryPhoto())
+            : (await tryPhoto()) || (await tryVideo());
+          if (!found) {
+            // Neither library had this scene — OpenAI will paint it below.
           }
-          // "no clip found" and "no key" are expected, not failures — only surface real errors.
-          collect(
-            warnings,
-            res.warnings
-              .filter((w) => w.code === "search-failed" || w.code === "download-failed")
-              .map((w) => `stock:${w.code} ${w.message}`),
-          );
         }
-        log(`   ${stockBySegment.size}/${narrative.segments.length} scenes got real footage; ${narrative.segments.length - stockBySegment.size} need AI images.`);
+        const covered = stockClips.size + stockPhotos.size;
+        log(`   ${stockClips.size} real clips, ${stockPhotos.size} real photos, ${narrative.segments.length - covered} need AI images.`);
       }
 
-      // AI-generate only the scenes stock didn't cover.
+      // AI-generate only the scenes no real media covered.
+      const stockBySegment = stockClips;
       const uncovered: AssetPlan = {
         ...plan,
-        segments: plan.segments.filter((s) => !stockBySegment.has(s.segmentId)),
+        segments: plan.segments.filter(
+          (s) => !stockClips.has(s.segmentId) && !stockPhotos.has(s.segmentId),
+        ),
       };
       let aiResult: GeneratedImages;
       if (uncovered.segments.length > 0) {
@@ -493,7 +503,7 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
         aiResult = emptyImages(`${runDir}/images`);
       }
 
-      return mergeSceneVisuals(narrative, stockBySegment, aiResult);
+      return mergeSceneVisuals(narrative, stockBySegment, stockPhotos, aiResult);
     },
     (r) => imagesCostUsd(r.metadata.generated),
   );
@@ -525,10 +535,26 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
         return result;
       }
 
-      // ---- NARRATED-SHORT: single narrator (the original path) ----
-      log("⑥ Synthesizing narration audio...");
+      // ---- NARRATED-SHORT: single narrator, CAST for this story ----
+      // A niche default voice reads every story the same way. Cast the narrator
+      // from the actual script so the delivery matches what happened.
+      log("⑥ Casting the narrator...");
+      const casting = await new ClaudeVoiceCastingProvider(kernel).cast({
+        title,
+        hook,
+        script: narrative.segments.map((s) => s.text).join(" "),
+        tone: profile.tone,
+        audience: profile.audience,
+        defaultVoice: profile.voice,
+        defaultInstructions: profile.voiceInstructions,
+      });
+      log(`   voice: ${casting.voice}${casting.usedDefault ? " (niche default)" : ` — ${casting.reason}`}`);
+
+      log("   Synthesizing narration audio...");
       const voiceProvider = new OpenAIVoiceGenerationProvider({
         ...buildVoiceGenerationContext(profile, run),
+        voice: casting.voice,
+        instructions: casting.voiceInstructions,
         outputDir: `${runDir}/voice`,
       });
 
@@ -787,12 +813,18 @@ function sceneImagePlan(narrative: NarrativeScript, profile: NicheProfile): Asse
     fallbackProvider: "runway" as const,
     searchQueries: [] as string[],
     // The image must depict THIS scene: lead with the visual hint, ground it in
-    // the exact narrated line, and enforce the niche's consistent look.
+    // the exact narrated line, and enforce the niche's consistent look. It also
+    // has to sit beside real stock footage without looking generated — hence the
+    // hard photographic constraints below.
     visualPrompt:
       `${segment.visualHint || segment.text} — a cinematic vertical (9:16) still that depicts ` +
       `this exact moment: "${segment.text}". Art direction: ${profile.visualStyle}. ` +
-      `Colour mood: ${profile.colorMood}. Atmospheric, dramatic lighting, photorealistic, ` +
-      `highly detailed. Absolutely no text, letters, captions, or watermarks in the image.`,
+      `Colour mood: ${profile.colorMood}. ` +
+      `Shot on a real camera: natural lighting, true-to-life textures, realistic depth of field, ` +
+      `subtle film grain, imperfect composition like documentary photography. ` +
+      `It must be INDISTINGUISHABLE from an unedited photograph. ` +
+      `Absolutely NOT an illustration, painting, render, digital art, or concept art. ` +
+      `No text, letters, captions, logos, or watermarks anywhere in the image.`,
     estimatedDuration: Math.max(1, Math.round(segment.endSecond - segment.startSecond)),
     licenseRequirements: "AI-generated",
     notes: segment.emotion,
@@ -887,21 +919,33 @@ function emptyImages(outputDir: string): GeneratedImages {
   };
 }
 
-/** Merge the stock clips and AI images into one per-scene visual list: each
- *  segment carries a `videoPath` (stock won) OR an `imagePath` (AI). */
+/**
+ * Merge the three visual sources into one per-scene list, in priority order:
+ * a real stock CLIP (`videoPath`), a real stock PHOTO (`imagePath`), then the
+ * AI image. Photos and AI images share the `imagePath` slot because composition
+ * treats them identically — scale-crop plus a Ken-Burns move.
+ */
 function mergeSceneVisuals(
   narrative: NarrativeScript,
-  stockBySegment: ReadonlyMap<string, string>,
+  stockClips: ReadonlyMap<string, string>,
+  stockPhotos: ReadonlyMap<string, string>,
   aiResult: GeneratedImages,
 ): GeneratedImages {
   const aiById = new Map(aiResult.images.map((im) => [im.segmentId, im]));
   const images: GeneratedImage[] = narrative.segments.map((_, i) => {
     const segmentId = `seg-${i + 1}`;
-    const clipPath = stockBySegment.get(segmentId);
+    const clipPath = stockClips.get(segmentId);
     if (clipPath) {
       return {
         segmentId, prompt: "stock-footage", imagePath: "", videoPath: clipPath,
-        status: "generated", model: "stock", format: "jpeg", width: 0, height: 0, bytes: 0,
+        status: "generated", model: "stock-video", format: "jpeg", width: 0, height: 0, bytes: 0,
+      };
+    }
+    const photoPath = stockPhotos.get(segmentId);
+    if (photoPath) {
+      return {
+        segmentId, prompt: "stock-photo", imagePath: photoPath,
+        status: "generated", model: "stock-photo", format: "jpeg", width: 0, height: 0, bytes: 0,
       };
     }
     const ai = aiById.get(segmentId);

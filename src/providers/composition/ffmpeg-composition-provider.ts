@@ -444,16 +444,23 @@ function finalArgs(opts: {
   args.push(
     "-r", String(ctx.fps),
     "-c:v", "libx264",
-    "-preset", "veryfast",
+    // The FINAL encode is the only one a viewer sees, so spend time here: a
+    // slower preset buys real quality at the same file size. (Intermediate
+    // per-scene clips stay on `veryfast` — they're throwaway.)
+    "-preset", "slow",
     // Cap threads so x264 doesn't spawn one per HOST core and OOM the container.
     "-threads", "2",
-    // Quality + a hard bitrate ceiling. Real stock footage carries far more
-    // detail than still images and blew past Telegram's 50 MB upload limit at
-    // x264's defaults; this keeps a ~65s vertical video comfortably under it.
-    "-crf", "26",
-    "-maxrate", "4500k",
-    "-bufsize", "9000k",
+    // Visually-lossless-ish quality, with a hard ceiling. Real stock footage
+    // carries far more detail than stills and blew past Telegram's 50 MB upload
+    // limit at x264's defaults; `slow` + crf 21 lands well under it and looks
+    // markedly better than the crf 26 it replaces.
+    "-crf", "21",
+    "-maxrate", "5200k",
+    "-bufsize", "10400k",
+    "-profile:v", "high",
     "-pix_fmt", "yuv420p",
+    // Let players start before the whole file downloads.
+    "-movflags", "+faststart",
   );
   if (audioMap) {
     args.push("-c:a", "aac", "-b:a", "192k");

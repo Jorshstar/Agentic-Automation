@@ -70,6 +70,48 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
   },
   {
     metadata: {
+      id: "voice-casting.user",
+      name: "Voice Casting Prompt",
+      description: "Casts the TTS voice + delivery style to match this specific story.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["voice", "user"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.6,
+      requiredVariables: ["title", "hook", "script", "tone", "audience", "voices", "defaultVoice"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "Cast the narrator for this specific video. The voice must feel like it belongs to THIS " +
+          "story — not a generic house voice.\n\n" +
+          "TITLE: {{title}}\n" +
+          "HOOK: {{hook}}\n" +
+          "TONE: {{tone}}\n" +
+          "AUDIENCE: {{audience}}\n\n" +
+          "SCRIPT:\n{{script}}\n\n" +
+          "Return ONLY valid JSON (no fences, no commentary):\n" +
+          "{ \"voice\": string, \"voiceInstructions\": string, \"reason\": string }\n\n" +
+          "Rules: `voice` must be EXACTLY ONE of: {{voices}}. Choose by what the story needs — a " +
+          "mass-casualty disaster wants gravity and restraint; a bizarre coincidence wants dry " +
+          "curiosity; a disappearance wants hushed unease. If nothing fits better, use " +
+          "\"{{defaultVoice}}\". `voiceInstructions` is 1-2 sentences of delivery direction for a " +
+          "text-to-speech engine: pace, weight, where to slow down, what emotion to withhold. " +
+          "Never ask for shouting or theatrics — restraint is scarier. `reason` is one short " +
+          "sentence explaining the casting.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
       id: "narrative-scary.system",
       name: "Scary Historical Narrator System Prompt",
       description: "Scriptwriter persona for TRUE historical horror. Opens on a verified fact.",

@@ -72,11 +72,12 @@ export class ClaudeNarrativeProvider implements NarrativeProvider {
         sections: serializeSections(plan),
         callToAction: plan.callToAction,
         targetDurationSeconds: targetDuration,
-        // Word RANGE so the video lands in a ~60-70s window and NEVER dips under
-        // 60s. TTS runs ~2.5 words/sec; the floor (minWords) is biased up so an
-        // undershoot still clears 60s.
-        minWords: Math.round(targetDuration * 2.4),
-        maxWords: Math.round(targetDuration * 2.55),
+        // Word RANGE so the video lands in its duration window. The CALLER owns
+        // this budget: it knows the niche's real speaking rate. Hardcoding it
+        // here once made the prompt ask for 166 words while the runner's gate
+        // demanded 134 — six wasted retries and a sped-up narration.
+        minWords: context.minWords ?? Math.round(targetDuration * 2.4),
+        maxWords: context.maxWords ?? Math.round(targetDuration * 2.55),
         platform: context.platform,
         language: context.language,
       },

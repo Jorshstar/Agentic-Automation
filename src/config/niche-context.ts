@@ -52,6 +52,24 @@ export interface RunSettings {
   readonly useStockVideo: boolean;
 }
 
+/**
+ * Measured speaking rates by pacing — the SINGLE source of truth for word
+ * budgets. A slow, ominous onyx delivery runs ~1.95 w/s; a fast tech read ~2.55.
+ * Budget the script for the pace the voice will actually speak at, or the
+ * narration gets speed-corrected and the delivery you asked for is destroyed.
+ */
+export function wordsPerSecond(pacing: NicheProfile["pacing"]): number {
+  switch (pacing) {
+    case "slow":
+      return 1.95;
+    case "fast":
+      return 2.55;
+    case "medium":
+    default:
+      return 2.3;
+  }
+}
+
 /** Sensible defaults: 60s vertical 1080x1920 YouTube Short, current cheap TTS model. */
 export const DEFAULT_RUN_SETTINGS: RunSettings = {
   platformLabel: "YouTube Shorts",
@@ -108,10 +126,15 @@ export function buildNarrativeContext(
   _profile: NicheProfile,
   run: RunSettings = DEFAULT_RUN_SETTINGS,
 ): NarrativeContext {
+  const wps = wordsPerSecond(_profile.pacing);
   return {
     language: _profile.language,
     platform: run.platformLabel,
     targetDurationSeconds: run.targetDurationSeconds,
+    // Budget the words for the pace this niche's voice actually speaks at, so
+    // the prompt and the runner's word gate can never disagree.
+    minWords: Math.round((run.targetDurationSeconds - 4) * wps),
+    maxWords: Math.round((run.targetDurationSeconds + 3.5) * wps),
     // Scary stories are TRUE historical horror — a narrator persona that opens on
     // a verified shocking fact and is forbidden from inventing anything.
     ...(_profile.niche === "scary-stories" ? { systemPromptId: "narrative-scary.system" } : {}),

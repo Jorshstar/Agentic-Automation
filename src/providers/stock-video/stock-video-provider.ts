@@ -1,4 +1,4 @@
-import type { StockVideoRequest, StockVideoResult } from "./types.js";
+import type { StockVideoRequest, StockVideoResult, StockPhotoResult } from "./types.js";
 
 /**
  * StockVideoProvider — the CONTRACT for anything that finds + downloads a real
@@ -9,4 +9,6 @@ import type { StockVideoRequest, StockVideoResult } from "./types.js";
 export interface StockVideoProvider {
   readonly name: string;
   find(request: StockVideoRequest): Promise<StockVideoResult>;
+  /** Find + download a real vertical PHOTOGRAPH for a scene. Never throws. */
+  findPhoto(request: StockVideoRequest): Promise<StockPhotoResult>;
 }

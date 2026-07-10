@@ -58,3 +58,19 @@ export interface StockVideoResult {
   readonly clip?: StockClip;
   readonly warnings: readonly StockVideoWarning[];
 }
+
+/** A downloaded real photograph for a scene (Ken-Burns'd like an AI image). */
+export interface StockPhoto {
+  readonly segmentId: string;
+  readonly photoPath: string;
+  readonly source: StockSource;
+  readonly width: number;
+  readonly height: number;
+  readonly creditUrl: string;
+}
+
+/** Result of one scene photo lookup. */
+export interface StockPhotoResult {
+  readonly photo?: StockPhoto;
+  readonly warnings: readonly StockVideoWarning[];
+}

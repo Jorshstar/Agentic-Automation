@@ -20,6 +20,14 @@ export interface NarrativeContext {
    * may never invent details.
    */
   readonly systemPromptId?: string;
+  /**
+   * The word window the script must land in. Supplied by the caller because the
+   * right budget depends on how fast this niche's VOICE actually speaks — a slow
+   * onyx delivery needs far fewer words than a fast one for the same duration.
+   * When absent, a medium-pace estimate is used.
+   */
+  readonly minWords?: number;
+  readonly maxWords?: number;
 }
 
 /** What the caller asks the narrator to turn into a script. */

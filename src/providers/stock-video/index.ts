@@ -9,4 +9,6 @@ export type {
   StockVideoWarningCode,
   StockClip,
   StockVideoResult,
+  StockPhoto,
+  StockPhotoResult,
 } from "./types.js";

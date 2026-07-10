@@ -6,6 +6,7 @@ import type {
   StockVideoContext,
   StockVideoRequest,
   StockVideoResult,
+  StockPhotoResult,
   StockClip,
   StockSource,
   StockVideoWarning,
@@ -72,6 +73,135 @@ export class PexelsPixabayStockVideoProvider implements StockVideoProvider {
 
     const clip = await this.download(best, ctx, request, warnings);
     return { ...(clip ? { clip } : {}), warnings };
+  }
+
+  /* --------------------------------- photos -------------------------------- */
+
+  /**
+   * Real PHOTOGRAPHS for a scene, same waterfall as clips: Pexels first, then
+   * Pixabay. Downloaded stills are Ken-Burns'd by composition exactly like an AI
+   * image — so a photo and a generated image are interchangeable downstream.
+   */
+  async findPhoto(request: StockVideoRequest): Promise<StockPhotoResult> {
+    const ctx: StockVideoContext = { ...this.context, ...request.context };
+    const warnings: StockVideoWarning[] = [];
+    const query = request.query.trim();
+    if (query === "") {
+      return { warnings: [{ code: "no-match", message: "Empty query.", segmentId: request.segmentId }] };
+    }
+
+    const pexelsKey = process.env.PEXELS_API_KEY;
+    const pixabayKey = process.env.PIXABAY_API_KEY;
+    if (!pexelsKey && !pixabayKey) {
+      return { warnings: [{ code: "no-key", message: "No stock API keys set.", segmentId: request.segmentId }] };
+    }
+
+    let best: PhotoCandidate | undefined;
+    if (pexelsKey) {
+      best = await this.searchPexelsPhotos(query, pexelsKey, request, warnings);
+    }
+    if (!best && pixabayKey) {
+      best = await this.searchPixabayPhotos(query, pixabayKey, request, warnings);
+    }
+    if (!best) {
+      warnings.push({ code: "no-match", message: `No vertical photo for "${query}".`, segmentId: request.segmentId });
+      return { warnings };
+    }
+
+    try {
+      await mkdir(ctx.outputDir, { recursive: true });
+      const photoPath = join(ctx.outputDir, `${request.segmentId}.jpg`).replace(/\\/gu, "/");
+      const bytes = await withRetry(async () => {
+        const res = await fetch(best.downloadUrl, { signal: AbortSignal.timeout(45_000) });
+        if (!res.ok) {
+          throw new Error(`download ${res.status}`);
+        }
+        return Buffer.from(await res.arrayBuffer());
+      }, { attempts: 2 });
+      await writeFile(photoPath, bytes);
+      return {
+        photo: {
+          segmentId: request.segmentId,
+          photoPath,
+          source: best.source,
+          width: best.width,
+          height: best.height,
+          creditUrl: best.creditUrl,
+        },
+        warnings,
+      };
+    } catch (error) {
+      warnings.push({ code: "download-failed", message: errMsg(error), segmentId: request.segmentId });
+      return { warnings };
+    }
+  }
+
+  private async searchPexelsPhotos(
+    query: string,
+    key: string,
+    request: StockVideoRequest,
+    warnings: StockVideoWarning[],
+  ): Promise<PhotoCandidate | undefined> {
+    try {
+      const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&orientation=portrait&per_page=12`;
+      const json = await withRetry(async () => {
+        const res = await fetch(url, { headers: { Authorization: key }, signal: AbortSignal.timeout(20_000) });
+        if (!res.ok) {
+          throw new Error(`Pexels photos ${res.status}`);
+        }
+        return (await res.json()) as PexelsPhotoResponse;
+      }, { attempts: 2 });
+
+      const photos = (json.photos ?? []).filter((p) => (p.height ?? 0) > (p.width ?? 0));
+      const chosen = photos.sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0];
+      const link = chosen?.src?.portrait ?? chosen?.src?.large2x ?? chosen?.src?.large;
+      if (!chosen || !link) {
+        return undefined;
+      }
+      return {
+        source: "pexels",
+        downloadUrl: link,
+        width: chosen.width ?? 0,
+        height: chosen.height ?? 0,
+        creditUrl: chosen.url ?? "https://pexels.com",
+      };
+    } catch (error) {
+      warnings.push({ code: "search-failed", message: `Pexels photos: ${errMsg(error)}`, segmentId: request.segmentId });
+      return undefined;
+    }
+  }
+
+  private async searchPixabayPhotos(
+    query: string,
+    key: string,
+    request: StockVideoRequest,
+    warnings: StockVideoWarning[],
+  ): Promise<PhotoCandidate | undefined> {
+    try {
+      const url = `https://pixabay.com/api/?key=${key}&q=${encodeURIComponent(query)}&image_type=photo&orientation=vertical&per_page=20&safesearch=true`;
+      const json = await withRetry(async () => {
+        const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+        if (!res.ok) {
+          throw new Error(`Pixabay photos ${res.status}`);
+        }
+        return (await res.json()) as PixabayPhotoResponse;
+      }, { attempts: 2 });
+
+      const hit = (json.hits ?? []).find((h) => (h.imageHeight ?? 0) > (h.imageWidth ?? 0) && !!h.largeImageURL);
+      if (!hit?.largeImageURL) {
+        return undefined;
+      }
+      return {
+        source: "pixabay",
+        downloadUrl: hit.largeImageURL,
+        width: hit.imageWidth ?? 0,
+        height: hit.imageHeight ?? 0,
+        creditUrl: hit.pageURL ?? "https://pixabay.com",
+      };
+    } catch (error) {
+      warnings.push({ code: "search-failed", message: `Pixabay photos: ${errMsg(error)}`, segmentId: request.segmentId });
+      return undefined;
+    }
   }
 
   /* -------------------------------- Pexels -------------------------------- */
@@ -264,4 +394,37 @@ interface PixabayHit {
 }
 interface PixabayResponse {
   readonly hits?: readonly PixabayHit[];
+}
+
+/** A normalized photo candidate from either library, before download. */
+interface PhotoCandidate {
+  readonly source: StockSource;
+  readonly downloadUrl: string;
+  readonly width: number;
+  readonly height: number;
+  readonly creditUrl: string;
+}
+
+interface PexelsPhoto {
+  readonly url?: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly src?: {
+    readonly portrait?: string;
+    readonly large2x?: string;
+    readonly large?: string;
+  };
+}
+interface PexelsPhotoResponse {
+  readonly photos?: readonly PexelsPhoto[];
+}
+
+interface PixabayPhotoHit {
+  readonly pageURL?: string;
+  readonly largeImageURL?: string;
+  readonly imageWidth?: number;
+  readonly imageHeight?: number;
+}
+interface PixabayPhotoResponse {
+  readonly hits?: readonly PixabayPhotoHit[];
 }
