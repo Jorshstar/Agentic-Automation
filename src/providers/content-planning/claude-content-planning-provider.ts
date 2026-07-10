@@ -72,7 +72,9 @@ export class ClaudeContentPlanningProvider implements ContentPlanningProvider {
         targetDurationSeconds: context.targetDurationSeconds,
       },
       expectedOutput: { format: "json", description: "a structured content plan" },
-      maxTokens: 1500,
+      // The scary/historical briefing is a large input and the plan (with per-
+      // section narration hints) can run long; 1500 truncated the JSON mid-object.
+      maxTokens: 2800,
     };
 
     const generated = await this.kernel.generate<string>(generateRequest);
