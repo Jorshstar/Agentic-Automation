@@ -447,6 +447,12 @@ function finalArgs(opts: {
     "-preset", "veryfast",
     // Cap threads so x264 doesn't spawn one per HOST core and OOM the container.
     "-threads", "2",
+    // Quality + a hard bitrate ceiling. Real stock footage carries far more
+    // detail than still images and blew past Telegram's 50 MB upload limit at
+    // x264's defaults; this keeps a ~65s vertical video comfortably under it.
+    "-crf", "26",
+    "-maxrate", "4500k",
+    "-bufsize", "9000k",
     "-pix_fmt", "yuv420p",
   );
   if (audioMap) {

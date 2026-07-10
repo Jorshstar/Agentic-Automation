@@ -119,6 +119,24 @@ export interface StudioResult {
 /** OpenAI TTS speaks ~2.3 words/sec at speed 1.0 (measured across the niche voices). */
 const WORDS_PER_SEC = 2.3;
 
+/**
+ * Measured speaking rates by pacing. A single global rate was wrong: a slow,
+ * ominous onyx delivery runs ~1.9 w/s, so a "157 word" script measured 83s and
+ * had to be sped up 1.27x — destroying the very delivery the niche asked for.
+ * Budget the words for the pace the voice will actually speak at.
+ */
+function wordsPerSecond(pacing: NicheProfile["pacing"]): number {
+  switch (pacing) {
+    case "slow":
+      return 1.95;
+    case "fast":
+      return 2.55;
+    case "medium":
+    default:
+      return WORDS_PER_SEC;
+  }
+}
+
 /** Total words spoken across all narration segments. */
 function countNarrationWords(narrative: NarrativeScript): number {
   return narrative.segments.reduce(
@@ -307,9 +325,10 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
     async () => {
       // Derived from the run's target so ANY brief duration works (65s → 140-158
       // words; 90s → 198-215). Floor biased up so an undershoot still clears it.
-      const wordsMin = Math.round((run.targetDurationSeconds - 4) * WORDS_PER_SEC);
-      const wordsMax = Math.round((run.targetDurationSeconds + 3.5) * WORDS_PER_SEC);
-      const targetWords = Math.round(run.targetDurationSeconds * WORDS_PER_SEC);
+      const wps = wordsPerSecond(profile.pacing);
+      const wordsMin = Math.round((run.targetDurationSeconds - 4) * wps);
+      const wordsMax = Math.round((run.targetDurationSeconds + 3.5) * wps);
+      const targetWords = Math.round(run.targetDurationSeconds * wps);
       const maxNarrativeAttempts = 6;
       let costUsd = 0;
 
