@@ -77,6 +77,8 @@ export interface ResearchResultMetadata {
     readonly totalTokens: number;
   };
   readonly latencyMs: number;
+  /** Live web searches run for this briefing (0/absent when search is off). */
+  readonly webSearchCount?: number;
 }
 
 /**

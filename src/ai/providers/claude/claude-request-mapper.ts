@@ -39,6 +39,25 @@ export function toAnthropicRequest(
     params.system = request.systemPrompt;
   }
 
+  // Server-side web search: Anthropic runs the searches and returns cited text.
+  //
+  // `allowed_callers: ["direct"]` is REQUIRED here. This tool version defaults to
+  // running search inside code execution ("dynamic filtering"), which on this
+  // account is rate-limited — the model burns its turn retrying and returns no
+  // briefing. Direct invocation skips code execution entirely.
+  if (request.webSearch) {
+    const tool: Anthropic.Messages.WebSearchTool20260209 = {
+      type: "web_search_20260209",
+      name: "web_search",
+      allowed_callers: ["direct"],
+      ...(request.webSearch.maxUses !== undefined ? { max_uses: request.webSearch.maxUses } : {}),
+      ...(request.webSearch.allowedDomains
+        ? { allowed_domains: [...request.webSearch.allowedDomains] }
+        : {}),
+    };
+    params.tools = [tool];
+  }
+
   // Only send temperature to models that accept it (avoids a 400 on modern models).
   if (!TEMPERATURE_UNSUPPORTED_MODELS.has(model)) {
     params.temperature = request.temperature;

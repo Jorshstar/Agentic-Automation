@@ -17,6 +17,14 @@ export const IMAGE_PRICE_USD = 0.07;
 /** USD per minute of synthesized speech (gpt-4o-mini-tts, approximate). */
 export const TTS_PRICE_PER_MINUTE_USD = 0.015;
 
+/** USD per Anthropic server-side web search ($10 per 1,000 searches). */
+export const WEB_SEARCH_PRICE_USD = 0.01;
+
+/** Cost of live web searches run during a stage. */
+export function webSearchCostUsd(searches: number): number {
+  return round4(Math.max(0, searches) * WEB_SEARCH_PRICE_USD);
+}
+
 /** Token usage shape shared by all AI-stage metadata. */
 export interface TokenUsageLike {
   readonly inputTokens: number;

@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ProviderResponse, FinishReason } from "../provider-response.js";
+import type { ProviderResponse, ProviderCitation, FinishReason } from "../provider-response.js";
 import type { BaseError } from "../../../lib/errors.js";
 import {
   ProviderUnavailableError,
@@ -20,11 +20,7 @@ export function toProviderResponse(
   message: Anthropic.Message,
   latencyMs: number,
 ): ProviderResponse {
-  // Concatenate the text blocks (ignore non-text blocks like tool_use).
-  const content = message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("");
+  const content = finalText(message);
 
   const promptTokens = message.usage.input_tokens;
   const completionTokens = message.usage.output_tokens;
@@ -40,8 +36,56 @@ export function toProviderResponse(
     },
     finishReason: mapFinishReason(message.stop_reason),
     latencyMs,
+    citations: extractCitations(message),
+    webSearchCount: message.usage.server_tool_use?.web_search_requests ?? 0,
     raw: message,
   };
+}
+
+/**
+ * The model's ANSWER, not its narration.
+ *
+ * When server tools run, the model interleaves commentary ("I'll search for
+ * X...") with tool blocks, then writes the real answer last. Everything before
+ * the final tool block is scaffolding, so we keep only the text after it. With
+ * no tool blocks (the common case) this is just all the text.
+ */
+function finalText(message: Anthropic.Message): string {
+  const isToolBlock = (block: Anthropic.ContentBlock): boolean =>
+    block.type === "server_tool_use" || block.type === "web_search_tool_result";
+
+  let lastToolIndex = -1;
+  message.content.forEach((block, index) => {
+    if (isToolBlock(block)) {
+      lastToolIndex = index;
+    }
+  });
+
+  return message.content
+    .slice(lastToolIndex + 1)
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+}
+
+/**
+ * Pull the real sources out of a web-search response. Anthropic attaches
+ * `web_search_result_location` citations to the text blocks it grounded; we
+ * collect them in order and dedupe by URL.
+ */
+function extractCitations(message: Anthropic.Message): readonly ProviderCitation[] {
+  const byUrl = new Map<string, ProviderCitation>();
+  for (const block of message.content) {
+    if (block.type !== "text" || !block.citations) {
+      continue;
+    }
+    for (const citation of block.citations) {
+      if (citation.type === "web_search_result_location" && !byUrl.has(citation.url)) {
+        byUrl.set(citation.url, { url: citation.url, title: citation.title ?? citation.url });
+      }
+    }
+  }
+  return [...byUrl.values()];
 }
 
 function mapFinishReason(stopReason: Anthropic.Message["stop_reason"]): FinishReason {

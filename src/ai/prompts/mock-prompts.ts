@@ -16,29 +16,28 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
     metadata: {
       id: "research.system",
       name: "Research System Prompt",
-      description: "Instructs the model to research short-form video topics.",
+      description: "Role + rules for the research agent. Contains no task variables.",
       owner: "content-team",
       createdAt: ISO,
       updatedAt: ISO,
-      version: "v2",
+      version: "v3",
       status: "stable",
       tags: ["research", "system"],
       outputFormat: "text",
       preferredProvider: "claude",
       preferredModel: "claude-opus-4-8",
       temperature: 0.4,
-      requiredVariables: ["topic", "audience", "tone", "language", "platform"],
     },
     versions: [
       {
         version: "v1",
-        status: "experimental",
+        status: "deprecated",
         template: "You research short-form video topics.",
         createdAt: ISO,
       },
       {
         version: "v2",
-        status: "stable",
+        status: "deprecated",
         template:
           "You are a research assistant preparing a {{tone}} {{platform}} short-form video " +
           "about \"{{topic}}\" for a {{audience}} audience, written in {{language}}.\n\n" +
@@ -48,29 +47,69 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "Keep every point short, accurate, and suitable for a 60-second video.",
         createdAt: ISO,
       },
+      {
+        version: "v3",
+        status: "stable",
+        template:
+          "You are a meticulous research assistant for short-form video scripts.\n\n" +
+          "You have a live web search tool. USE IT. Search before you answer, especially for " +
+          "anything current, contested, numeric, or specific (dates, prices, statistics, product " +
+          "names, recent events). Do not rely on memory for facts that could have changed.\n\n" +
+          "Rules:\n" +
+          "- Prefer primary and reputable sources. Cite what you use.\n" +
+          "- State only what the sources support. If sources disagree, say so briefly.\n" +
+          "- If you cannot verify a fact, leave it out rather than guess.\n" +
+          "- Never invent statistics, quotes, dates, or study names.\n" +
+          "- Be concrete: a specific number or named example beats a vague claim.\n" +
+          "- Write plainly. No hype, no filler, no marketing language.\n" +
+          "- NEVER narrate your process. Do not write \"I'll search for...\", \"Let me check...\", " +
+          "or \"I have enough data\". Your answer must contain the briefing and nothing else.",
+        createdAt: ISO,
+      },
     ],
   },
   {
     metadata: {
       id: "research.user",
       name: "Research User Prompt",
-      description: "Asks the model to research a specific topic.",
+      description: "The research task: one topic, briefing format, grounded in live sources.",
       owner: "content-team",
       createdAt: ISO,
       updatedAt: ISO,
-      version: "v1",
+      version: "v2",
       status: "stable",
       tags: ["research", "user"],
-      outputFormat: "json",
+      outputFormat: "text",
       preferredProvider: "claude",
-      temperature: 0.5,
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.3,
+      requiredVariables: ["topic", "audience", "tone", "language", "platform"],
     },
     versions: [
       {
         version: "v1",
-        status: "stable",
+        status: "deprecated",
         template:
           "Research the topic {{topic}} for a {{audience}} audience. Return the key points.",
+        createdAt: ISO,
+      },
+      {
+        version: "v2",
+        status: "stable",
+        template:
+          "Research this topic for a {{tone}} {{platform}} video aimed at a {{audience}} " +
+          "audience. Write in {{language}}.\n\n" +
+          "TOPIC: {{topic}}\n\n" +
+          "Search the web first, then write the briefing in EXACTLY this structure:\n" +
+          "1. A one-paragraph summary (2-4 sentences) of what is actually true and why it is " +
+          "interesting.\n" +
+          "2. A blank line.\n" +
+          "3. Exactly 5 key points, each on its own line starting with \"- \".\n\n" +
+          "Every key point must be a concrete, verifiable fact a viewer would find surprising or " +
+          "useful — a number, a date, a named example, a specific consequence. No generic advice, " +
+          "no restating the topic. Keep each point under 25 words so it fits a 60-second video. " +
+          "Output the briefing only: no headings, no preamble, no source list (citations are " +
+          "captured automatically).",
         createdAt: ISO,
       },
     ],

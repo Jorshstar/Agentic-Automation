@@ -23,8 +23,16 @@ import type {
  *   ResearchAgent → ResearchProvider (this) → AIKernel.generate() → Claude
  */
 
-/** The prompt this provider drives. The TEXT lives in the Prompt Management System. */
-const RESEARCH_PROMPT_ID = "research.system";
+/**
+ * The prompts this provider drives (TEXT lives in the Prompt Management System):
+ *   - `research.system` — the role + rules (search first, never invent facts)
+ *   - `research.user`   — the task for one topic
+ */
+const RESEARCH_SYSTEM_PROMPT_ID = "research.system";
+const RESEARCH_USER_PROMPT_ID = "research.user";
+
+/** Cap on live searches per topic. ~$0.01 each, so this bounds research cost. */
+const MAX_WEB_SEARCHES = 4;
 
 /** Sensible defaults for the context the agent doesn't provide. */
 const DEFAULT_RESEARCH_CONTEXT: ResearchContext = {
@@ -76,7 +84,8 @@ export class ClaudeResearchProvider implements ResearchProvider {
    */
   async research(request: ResearchRequest): Promise<ResearchResult> {
     const generateRequest: AIGenerateRequest = {
-      promptId: RESEARCH_PROMPT_ID,
+      promptId: RESEARCH_USER_PROMPT_ID,
+      systemPromptId: RESEARCH_SYSTEM_PROMPT_ID,
       variables: {
         topic: request.topic,
         audience: this.context.audience,
@@ -85,17 +94,34 @@ export class ClaudeResearchProvider implements ResearchProvider {
         platform: this.context.platform,
       },
       expectedOutput: { format: "text", description: "a concise research briefing" },
-      maxTokens: 700,
+      // Live web search: the model reads real pages and the API returns real
+      // citations, so `references` are actual sources, not text the model made up.
+      webSearch: { maxUses: MAX_WEB_SEARCHES },
+      // Searching + reasoning + the briefing all share this budget; 700 (the old
+      // no-search value) truncates the answer before the briefing is written.
+      maxTokens: 2500,
     };
 
     const generated = await this.kernel.generate<string>(generateRequest);
     const parsed = parseResearchText(generated.output);
 
+    // Sources come from the API's citations (verified), not from regexing URLs
+    // out of prose. Fall back to any URLs in the text if no search ran.
+    const references: readonly ResearchReference[] =
+      generated.citations.length > 0
+        ? generated.citations.map((c) => ({ title: c.title, url: c.url }))
+        : parsed.references;
+
+    const warnings = [
+      ...parsed.warnings.filter((w) => !w.startsWith("The model output contained no source URLs")),
+      ...(references.length === 0 ? ["Research produced no cited sources."] : []),
+    ];
+
     const result: ResearchResult = {
       summary: parsed.summary,
       keyPoints: parsed.keyPoints,
-      references: parsed.references,
-      warnings: parsed.warnings,
+      references,
+      warnings,
       metadata: {
         promptId: generated.promptId,
         promptVersion: generated.promptVersion,
@@ -107,6 +133,7 @@ export class ClaudeResearchProvider implements ResearchProvider {
           totalTokens: generated.usage.totalTokens,
         },
         latencyMs: generated.latencyMs,
+        webSearchCount: generated.webSearchCount,
       },
     };
 
@@ -174,26 +201,15 @@ function parseResearchText(raw: string): ParsedResearch {
     references.push({ title: url, url });
   }
 
-  // Summary = first non-empty paragraph, skipping markdown headings and stopping
-  // when the key-points list begins.
-  const summaryLines: string[] = [];
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (trimmedLine === "") {
-      if (summaryLines.length > 0) {
-        break; // end of the first real paragraph
-      }
-      continue; // skip leading blank lines
-    }
-    if (/^#{1,6}\s/u.test(trimmedLine)) {
-      continue; // skip markdown headings (e.g. "# Research Briefing")
-    }
-    if (isBullet(line)) {
-      break; // reached the key-points list
-    }
-    summaryLines.push(trimmedLine);
-  }
-  const summary = summaryLines.length > 0 ? summaryLines.join(" ") : text;
+  // Summary = the paragraph DIRECTLY ABOVE the key-points list.
+  //
+  // Taking the *first* paragraph is wrong: when web search runs, the model can
+  // prepend narration ("I have enough data to write the briefing.") before the
+  // real summary. The briefing's shape is fixed — summary, blank line, bullets —
+  // so we anchor on the bullets and walk back over the paragraph above them,
+  // which skips any number of narration paragraphs.
+  const firstBullet = lines.findIndex((line) => isBullet(line));
+  const summary = firstBullet > 0 ? paragraphAbove(lines, firstBullet) : firstParagraph(lines, text);
 
   if (text.length === 0) {
     warnings.push("The model returned empty content.");
@@ -206,4 +222,42 @@ function parseResearchText(raw: string): ParsedResearch {
   }
 
   return { summary, keyPoints, references, warnings };
+}
+
+/** The contiguous block of text lines immediately above `index`, joined. */
+function paragraphAbove(lines: readonly string[], index: number): string {
+  const collected: string[] = [];
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const line = (lines[i] ?? "").trim();
+    if (line === "") {
+      if (collected.length > 0) {
+        break; // hit the blank line above the paragraph
+      }
+      continue; // skip blanks between the paragraph and the bullets
+    }
+    if (/^#{1,6}\s/u.test(line)) {
+      continue; // ignore markdown headings
+    }
+    collected.unshift(line);
+  }
+  return collected.join(" ");
+}
+
+/** Fallback when the model produced no bullets: the first real paragraph. */
+function firstParagraph(lines: readonly string[], fallback: string): string {
+  const collected: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "") {
+      if (collected.length > 0) {
+        break;
+      }
+      continue;
+    }
+    if (/^#{1,6}\s/u.test(trimmed)) {
+      continue;
+    }
+    collected.push(trimmed);
+  }
+  return collected.length > 0 ? collected.join(" ") : fallback;
 }

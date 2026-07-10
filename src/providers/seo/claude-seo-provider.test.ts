@@ -18,6 +18,8 @@ function stubKernel(output: string | Error): AIKernel {
         model: "stub",
         usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150, costUsd: 0 },
         latencyMs: 1,
+        citations: [],
+        webSearchCount: 0,
       };
     },
   };

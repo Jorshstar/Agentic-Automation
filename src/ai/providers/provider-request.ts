@@ -18,6 +18,14 @@ export interface ProviderRequest {
   readonly expectedOutput?: OutputFormat;
   readonly model: string;
   readonly provider: ProviderName;
+  /**
+   * When set, the client enables its vendor's server-side web search so the
+   * model can read live pages and return real citations.
+   */
+  readonly webSearch?: {
+    readonly maxUses?: number;
+    readonly allowedDomains?: readonly string[];
+  };
   /** Free-form, non-secret metadata (e.g. correlation id). */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /** Reserved for future provider options; kept generic (never `any`). */

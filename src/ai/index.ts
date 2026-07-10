@@ -19,6 +19,8 @@ export type {
   AIGenerateRequest,
   AIGenerateResult,
   AIUsage,
+  Citation,
+  WebSearchOptions,
   ExpectedOutput,
   OutputFormat,
   ProviderName,

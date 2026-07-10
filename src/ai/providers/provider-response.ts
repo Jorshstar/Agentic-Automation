@@ -17,6 +17,12 @@ export interface ProviderUsage {
   readonly totalTokens: number;
 }
 
+/** A source the model cited from a live web search. */
+export interface ProviderCitation {
+  readonly url: string;
+  readonly title: string;
+}
+
 export interface ProviderResponse {
   /** The generated text. */
   readonly content: string;
@@ -26,6 +32,10 @@ export interface ProviderResponse {
   readonly finishReason: FinishReason;
   /** Round-trip time in milliseconds. */
   readonly latencyMs: number;
+  /** Deduped sources the model cited (empty when web search wasn't used). */
+  readonly citations: readonly ProviderCitation[];
+  /** Number of live web searches the provider ran (drives cost). */
+  readonly webSearchCount: number;
   /** The raw provider payload, kept opaque (`unknown`, never `any`). */
   readonly raw: unknown;
 }

@@ -18,7 +18,7 @@ import {
   buildStockVideoContext,
 } from "../config/niche-context.js";
 import type { RunSettings } from "../config/niche-context.js";
-import { claudeCostUsd, imagesCostUsd, ttsCostUsd } from "../config/pricing.js";
+import { claudeCostUsd, imagesCostUsd, ttsCostUsd, webSearchCostUsd } from "../config/pricing.js";
 import { RunLedger, makeRunId } from "./run-ledger.js";
 import { ClaudeTopicGenerationProvider } from "../providers/topic-generation/index.js";
 import { createTopicHistoryStore, normalizeTitle } from "./topic-history.js";
@@ -222,18 +222,20 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
   await ledger.setTopic(title);
   log(`   Topic: "${title}"`);
 
-  // --- 2. Research ---
+  // --- 2. Research (LIVE web search — real, cited sources) ---
   const research = await ledger.stage(
     "research",
     async () => {
-      log("② Researching...");
-      return new ClaudeResearchProvider(kernel, buildResearchContext(profile, run)).research({
+      log("② Researching (searching the live web)...");
+      const result = await new ClaudeResearchProvider(kernel, buildResearchContext(profile, run)).research({
         topic: title,
         angle: angle || undefined,
         keywords,
       });
+      log(`   ${result.metadata.webSearchCount ?? 0} searches, ${result.references.length} sources cited.`);
+      return result;
     },
-    (r) => claudeCostUsd(r.metadata.tokenUsage),
+    (r) => claudeCostUsd(r.metadata.tokenUsage) + webSearchCostUsd(r.metadata.webSearchCount ?? 0),
   );
   collect(warnings, research.warnings.map((w) => `research: ${w}`));
 

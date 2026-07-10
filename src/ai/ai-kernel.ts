@@ -60,6 +60,13 @@ export class DefaultAIKernel implements AIKernel {
       request.variables ?? {},
     );
 
+    // 2b. Optionally render a SYSTEM prompt (role + rules) from its own registry
+    //     entry, using the same variables. Keeps the task prompt task-only.
+    const renderedSystemPrompt =
+      request.systemPromptId !== undefined
+        ? promptManager.renderPrompt(request.systemPromptId, request.variables ?? {})
+        : undefined;
+
     // 3. Decide model, temperature, and provider.
     //    Priority: explicit request override > prompt metadata > ModelSelector.
     const model = request.model ?? metadata.preferredModel ?? modelSelector.selectModel(request);
@@ -71,11 +78,13 @@ export class DefaultAIKernel implements AIKernel {
     const client = providerFactory(providerName);
     const providerRequest: ProviderRequest = {
       userPrompt: renderedPrompt,
+      ...(renderedSystemPrompt !== undefined ? { systemPrompt: renderedSystemPrompt } : {}),
       temperature,
       maxTokens: request.maxTokens,
       expectedOutput: request.expectedOutput.format,
       model,
       provider: providerName,
+      ...(request.webSearch ? { webSearch: request.webSearch } : {}),
       metadata: { promptId: request.promptId, promptVersion: activeVersion.version },
     };
 
@@ -106,6 +115,8 @@ export class DefaultAIKernel implements AIKernel {
         costUsd: 0,
       },
       latencyMs: response.latencyMs,
+      citations: response.citations,
+      webSearchCount: response.webSearchCount,
     };
   }
 }
