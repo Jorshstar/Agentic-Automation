@@ -89,6 +89,8 @@ export interface AIGenerateResult<TOutput = unknown> {
   readonly latencyMs: number;
   /** Real sources the model cited (empty unless `webSearch` was requested). */
   readonly citations: readonly Citation[];
+  /** Pages the search retrieved, including ones the model explored and dropped. */
+  readonly searchResults: readonly Citation[];
   /** How many live web searches the provider actually ran (for cost). */
   readonly webSearchCount: number;
 }

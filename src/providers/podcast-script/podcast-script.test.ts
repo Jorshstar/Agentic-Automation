@@ -15,6 +15,7 @@ function stubKernel(output: string): AIKernel {
         usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10, costUsd: 0 },
         latencyMs: 1,
         citations: [],
+        searchResults: [],
         webSearchCount: 0,
       };
     },

@@ -32,8 +32,10 @@ export interface ProviderResponse {
   readonly finishReason: FinishReason;
   /** Round-trip time in milliseconds. */
   readonly latencyMs: number;
-  /** Deduped sources the model cited (empty when web search wasn't used). */
+  /** Deduped sources the model CITED in its prose (empty for JSON answers). */
   readonly citations: readonly ProviderCitation[];
+  /** Pages the web search actually RETRIEVED, including ones later discarded. */
+  readonly searchResults: readonly ProviderCitation[];
   /** Number of live web searches the provider ran (drives cost). */
   readonly webSearchCount: number;
   /** The raw provider payload, kept opaque (`unknown`, never `any`). */

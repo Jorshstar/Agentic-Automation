@@ -9,7 +9,9 @@ import type {
   ResearchResult,
   ResearchReference,
   ResearchContext,
+  ResearchPackage,
 } from "./types.js";
+import { HISTORICAL_ERAS, CLAIM_TYPES } from "./types.js";
 
 /**
  * ClaudeResearchProvider — the first REAL research provider.
@@ -31,8 +33,18 @@ import type {
 const RESEARCH_SYSTEM_PROMPT_ID = "research.system";
 const RESEARCH_USER_PROMPT_ID = "research.user";
 
+/** The historical-research persona (scary niche): picks + verifies a real event. */
+const HISTORICAL_SYSTEM_PROMPT_ID = "research-scary.system";
+const HISTORICAL_USER_PROMPT_ID = "research-scary.user";
+
 /** Cap on live searches per topic. ~$0.01 each, so this bounds research cost. */
 const MAX_WEB_SEARCHES = 4;
+/**
+ * Historical research picks AND verifies an event. Each search dumps its results
+ * into the context window, so this cap controls INPUT TOKENS far more than the
+ * $0.01/search fee — 8 searches cost ~$0.68 a run, 5 keeps it near $0.30.
+ */
+const MAX_HISTORICAL_SEARCHES = 5;
 
 /** Sensible defaults for the context the agent doesn't provide. */
 const DEFAULT_RESEARCH_CONTEXT: ResearchContext = {
@@ -83,6 +95,10 @@ export class ClaudeResearchProvider implements ResearchProvider {
    * point, and parse the generated text into a structured ResearchResult.
    */
   async research(request: ResearchRequest): Promise<ResearchResult> {
+    if (request.historical) {
+      return this.researchHistorical(request);
+    }
+
     const generateRequest: AIGenerateRequest = {
       promptId: RESEARCH_USER_PROMPT_ID,
       systemPromptId: RESEARCH_SYSTEM_PROMPT_ID,
@@ -137,6 +153,79 @@ export class ClaudeResearchProvider implements ResearchProvider {
       },
     };
 
+    this.lastRichResult = result;
+    return result;
+  }
+
+  /**
+   * The HISTORICAL path (scary niche). The researcher SELECTS a real event
+   * (unless one is assigned), verifies it with live web search, and returns a
+   * structured {@link ResearchPackage} — every claim tagged with how it is
+   * evidenced. Hard rotation bans are passed in as forbidden countries/eras.
+   */
+  private async researchHistorical(request: ResearchRequest): Promise<ResearchResult> {
+    const generateRequest: AIGenerateRequest = {
+      promptId: HISTORICAL_USER_PROMPT_ID,
+      systemPromptId: HISTORICAL_SYSTEM_PROMPT_ID,
+      variables: {
+        directive: request.topic.trim() === "" ? "none" : request.topic,
+        avoidTopics: joinOrNone(request.avoidTopics),
+        avoidCountries: joinOrNone(request.avoidCountries),
+        avoidEras: joinOrNone(request.avoidEras),
+      },
+      expectedOutput: { format: "json", description: "a historical research package" },
+      // Picking + verifying an event takes more searches than a plain briefing.
+      webSearch: { maxUses: MAX_HISTORICAL_SEARCHES },
+      // The package is large (timeline + theories + graded claims). Too small a
+      // budget truncates the JSON mid-object and the whole run loses the event.
+      maxTokens: 8000,
+    };
+
+    const generated = await this.kernel.generate<string>(generateRequest);
+    const warnings: string[] = [];
+    const pkg = parsePackage(generated.output, warnings);
+
+    // Sources = the URLs the model says it used for THIS event, VERIFIED against
+    // the pages the search actually fetched. That drops both hallucinated URLs
+    // and the pages it explored for other events and discarded.
+    const fetched = new Map(generated.searchResults.map((r) => [normalizeUrl(r.url), r]));
+    const verified: ResearchReference[] = [];
+    for (const listed of pkg.sources) {
+      const match = fetched.get(normalizeUrl(listed));
+      if (match) {
+        verified.push({ title: match.title, url: match.url });
+      }
+    }
+
+    let references: readonly ResearchReference[] = verified;
+    if (references.length === 0) {
+      // Prose citations (rare for JSON answers) are the next-best real evidence.
+      references = generated.citations.map((c) => ({ title: c.title, url: c.url }));
+    }
+    if (references.length === 0) {
+      warnings.push("Research produced no verifiable sources for the chosen event.");
+    }
+
+    const result: ResearchResult = {
+      summary: pkg.summary,
+      keyPoints: pkg.keyPoints,
+      references,
+      warnings,
+      package: pkg.package,
+      metadata: {
+        promptId: generated.promptId,
+        promptVersion: generated.promptVersion,
+        provider: generated.provider,
+        model: generated.model,
+        tokenUsage: {
+          inputTokens: generated.usage.inputTokens,
+          outputTokens: generated.usage.outputTokens,
+          totalTokens: generated.usage.totalTokens,
+        },
+        latencyMs: generated.latencyMs,
+        webSearchCount: generated.webSearchCount,
+      },
+    };
     this.lastRichResult = result;
     return result;
   }
@@ -222,6 +311,152 @@ function parseResearchText(raw: string): ParsedResearch {
   }
 
   return { summary, keyPoints, references, warnings };
+}
+
+/* -------------------------- historical package parse -------------------------- */
+
+interface ParsedPackage {
+  readonly summary: string;
+  readonly keyPoints: readonly string[];
+  /** The model's own source list — unverified, used only as a last resort. */
+  readonly sources: readonly string[];
+  readonly package?: ResearchPackage;
+}
+
+/**
+ * Parse the historical JSON package. Defensive throughout: a malformed field
+ * degrades to a safe value with a warning; a totally unparseable response
+ * yields no package (the run then surfaces the warnings rather than crashing).
+ */
+function parsePackage(raw: string, warnings: string[]): ParsedPackage {
+  const root = parseJsonObject(raw, warnings);
+  if (Object.keys(root).length === 0) {
+    return { summary: raw.trim().slice(0, 500), keyPoints: [], sources: [] };
+  }
+
+  const eventName = str(root["eventName"], "");
+  const summary = str(root["summary"], "");
+  const keyPoints = strArray(root["keyPoints"]);
+  if (eventName === "") {
+    warnings.push("Research package has no event name.");
+  }
+  if (keyPoints.length === 0) {
+    warnings.push("Research package has no key points.");
+  }
+
+  const pkg: ResearchPackage = {
+    eventName,
+    period: str(root["period"], "unknown"),
+    country: str(root["country"], "unknown"),
+    era: oneOf(root["era"], HISTORICAL_ERAS, "modern", "era", warnings),
+    location: str(root["location"], "unknown"),
+    peopleInvolved: strArray(root["peopleInvolved"]),
+    background: str(root["background"], ""),
+    timeline: objArray(root["timeline"], (r) => ({
+      when: str(r["when"], "unknown"),
+      what: str(r["what"], ""),
+    })),
+    officialExplanation: str(root["officialExplanation"], "unknown"),
+    alternativeTheories: objArray(root["alternativeTheories"], (r) => ({
+      theory: str(r["theory"], ""),
+      proponents: str(r["proponents"], "unknown"),
+      evidence: str(r["evidence"], "unknown"),
+    })),
+    whyDebated: str(root["whyDebated"], ""),
+    unexplainedFacts: strArray(root["unexplainedFacts"]),
+    claims: objArray(root["claims"], (r) => ({
+      claim: str(r["claim"], ""),
+      type: oneOf(r["type"], CLAIM_TYPES, "speculation", "claim.type", warnings),
+      confidence: oneOf(r["confidence"], ["high", "medium", "low"] as const, "low", "claim.confidence", warnings),
+    })).filter((c) => c.claim !== ""),
+    shockingFact: str(root["shockingFact"], ""),
+  };
+
+  if (pkg.claims.length === 0) {
+    warnings.push("Research package tagged no claims with evidence type/confidence.");
+  }
+  if (pkg.shockingFact === "") {
+    warnings.push("Research package has no shocking fact for the hook.");
+  }
+
+  return {
+    summary: summary || pkg.background,
+    keyPoints,
+    sources: strArray(root["sources"]),
+    package: pkg,
+  };
+}
+
+function str(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
+}
+
+function strArray(value: unknown): readonly string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v.trim() !== "") : [];
+}
+
+function objArray<T>(value: unknown, map: (record: Record<string, unknown>) => T): T[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object" && !Array.isArray(entry))
+    .map(map);
+}
+
+function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T,
+  field: string,
+  warnings: string[],
+): T {
+  if (typeof value === "string" && (allowed as readonly string[]).includes(value)) {
+    return value as T;
+  }
+  warnings.push(`"${field}" was "${String(value)}" → "${fallback}".`);
+  return fallback;
+}
+
+function parseJsonObject(raw: string, warnings: string[]): Record<string, unknown> {
+  const cleaned = raw.replace(/```(?:json)?/giu, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    warnings.push("Research output did not contain a JSON object.");
+    return {};
+  }
+  try {
+    const parsed: unknown = JSON.parse(cleaned.slice(start, end + 1));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // The most common cause is a token budget that cut the object off mid-write.
+    const truncated = !cleaned.trimEnd().endsWith("}");
+    warnings.push(
+      truncated
+        ? "Research JSON was truncated (output token budget too small)."
+        : "Research output was not valid JSON.",
+    );
+    return {};
+  }
+  warnings.push("Research output JSON was not an object.");
+  return {};
+}
+
+/** Compare URLs ignoring scheme, "www.", and trailing slashes. */
+function normalizeUrl(url: string): string {
+  return url
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//u, "")
+    .replace(/^www\./u, "")
+    .replace(/\/+$/u, "");
+}
+
+function joinOrNone(values: readonly string[] | undefined): string {
+  return values && values.length > 0 ? values.join("; ") : "none";
 }
 
 /** The contiguous block of text lines immediately above `index`, joined. */

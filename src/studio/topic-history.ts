@@ -19,6 +19,37 @@ export interface UsedTopic {
   readonly title: string;
   readonly niche: string;
   readonly date: string;
+  /**
+   * Where and when the event happened. Recorded for HARD ROTATION: the next
+   * research run is told to avoid these, so the studio can't drift back to the
+   * same country or era every time. Absent on older records.
+   */
+  readonly country?: string;
+  readonly era?: string;
+}
+
+/** Distinct countries used in the most recent runs (newest first). */
+export function recentCountries(topics: readonly UsedTopic[], limit: number): readonly string[] {
+  return distinct(topics.map((t) => t.country), limit);
+}
+
+/** Distinct historical eras used in the most recent runs (newest first). */
+export function recentEras(topics: readonly UsedTopic[], limit: number): readonly string[] {
+  return distinct(topics.map((t) => t.era), limit);
+}
+
+function distinct(values: readonly (string | undefined)[], limit: number): readonly string[] {
+  const seen: string[] = [];
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed && !seen.some((s) => s.toLowerCase() === trimmed.toLowerCase())) {
+      seen.push(trimmed);
+    }
+    if (seen.length >= limit) {
+      break;
+    }
+  }
+  return seen;
 }
 
 export interface TopicHistoryStore {

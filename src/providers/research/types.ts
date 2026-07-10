@@ -10,14 +10,90 @@ export interface ResearchProviderSource {
   readonly url: string;
 }
 
+/** Historical eras the scary/history research rotates across. */
+export type HistoricalEra =
+  | "ancient" | "medieval" | "colonial" | "industrial"
+  | "world-wars" | "cold-war" | "modern" | "recent";
+
+export const HISTORICAL_ERAS: readonly HistoricalEra[] = [
+  "ancient", "medieval", "colonial", "industrial",
+  "world-wars", "cold-war", "modern", "recent",
+];
+
+/** How a claim is evidenced — the distinction the researcher must preserve. */
+export type ClaimType =
+  | "documented-fact" | "eyewitness-testimony" | "expert-theory"
+  | "speculation" | "myth" | "folklore";
+
+export const CLAIM_TYPES: readonly ClaimType[] = [
+  "documented-fact", "eyewitness-testimony", "expert-theory",
+  "speculation", "myth", "folklore",
+];
+
+export type ClaimConfidence = "high" | "medium" | "low";
+
+export interface ResearchClaim {
+  readonly claim: string;
+  readonly type: ClaimType;
+  readonly confidence: ClaimConfidence;
+}
+
+export interface ResearchTimelineEntry {
+  readonly when: string;
+  readonly what: string;
+}
+
+export interface ResearchTheory {
+  readonly theory: string;
+  readonly proponents: string;
+  readonly evidence: string;
+}
+
+/**
+ * The full historical research PACKAGE (scary/history niche).
+ *
+ * Produced instead of a loose briefing so downstream stages get structure:
+ * the narrator gets `shockingFact` for the hook, the studio gets `country`/`era`
+ * for hard rotation, and every assertion is tagged with how it is evidenced.
+ */
+export interface ResearchPackage {
+  readonly eventName: string;
+  readonly period: string;
+  readonly country: string;
+  readonly era: HistoricalEra;
+  readonly location: string;
+  readonly peopleInvolved: readonly string[];
+  readonly background: string;
+  readonly timeline: readonly ResearchTimelineEntry[];
+  readonly officialExplanation: string;
+  readonly alternativeTheories: readonly ResearchTheory[];
+  readonly whyDebated: string;
+  readonly unexplainedFacts: readonly string[];
+  readonly claims: readonly ResearchClaim[];
+  /** The single most disturbing TRUE fact — the narrator's hook material. */
+  readonly shockingFact: string;
+}
+
 /** What the agent asks the provider to research. */
 export interface ResearchRequest {
-  /** The topic/title to research. */
+  /** The topic/title to research. Empty when the researcher must pick one. */
   readonly topic: string;
   /** Optional angle or focus for the research. */
   readonly angle?: string;
   /** Optional seed keywords to steer the research. */
   readonly keywords?: readonly string[];
+  /**
+   * Use the historical-research persona: the model SELECTS a real event (unless
+   * `topic` is given), returns a full {@link ResearchPackage}, and obeys the
+   * rotation bans below.
+   */
+  readonly historical?: boolean;
+  /** Past topic titles the researcher must not reuse. */
+  readonly avoidTopics?: readonly string[];
+  /** Countries used recently — forbidden this run (hard rotation). */
+  readonly avoidCountries?: readonly string[];
+  /** Eras used recently — forbidden this run (hard rotation). */
+  readonly avoidEras?: readonly string[];
 }
 
 /** What the provider returns for a research request. */
@@ -94,4 +170,6 @@ export interface ResearchResult {
   readonly references: readonly ResearchReference[];
   readonly warnings: readonly string[];
   readonly metadata: ResearchResultMetadata;
+  /** Present only for historical research — the full structured package. */
+  readonly package?: ResearchPackage;
 }

@@ -112,6 +112,9 @@ export function buildNarrativeContext(
     language: _profile.language,
     platform: run.platformLabel,
     targetDurationSeconds: run.targetDurationSeconds,
+    // Scary stories are TRUE historical horror — a narrator persona that opens on
+    // a verified shocking fact and is forbidden from inventing anything.
+    ...(_profile.niche === "scary-stories" ? { systemPromptId: "narrative-scary.system" } : {}),
   };
 }
 

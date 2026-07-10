@@ -63,7 +63,7 @@ export class ClaudeNarrativeProvider implements NarrativeProvider {
 
     const generateRequest: AIGenerateRequest = {
       promptId: NARRATIVE_PROMPT_ID,
-      systemPromptId: NARRATIVE_SYSTEM_PROMPT_ID,
+      systemPromptId: context.systemPromptId ?? NARRATIVE_SYSTEM_PROMPT_ID,
       variables: {
         hook: plan.hook,
         coreMessage: plan.coreMessage,

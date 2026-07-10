@@ -20,6 +20,7 @@ function stubKernel(output: string, citations: readonly Citation[] = []): {
         usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20, costUsd: 0 },
         latencyMs: 1,
         citations,
+        searchResults: [],
         webSearchCount: citations.length > 0 ? 2 : 0,
       };
     },

@@ -32,6 +32,7 @@ export class MockProviderClient implements ProviderClient {
       finishReason: "stop",
       latencyMs: Date.now() - startedAt,
       citations: [],
+      searchResults: [],
       webSearchCount: 0,
       raw: { mock: true, requestedProvider: request.provider, model: request.model },
     };

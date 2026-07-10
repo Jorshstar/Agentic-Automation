@@ -40,8 +40,10 @@ export class ClaudeProviderClient implements ProviderClient {
       // sending the assistant's content back UNCHANGED, bounded so a pathological
       // loop can never run forever. Text/citations/search count accumulate.
       const messages = [...params.messages];
-      let text = toProviderResponse(message, 0).content;
-      let citations = toProviderResponse(message, 0).citations;
+      const first = toProviderResponse(message, 0);
+      let text = first.content;
+      let citations = first.citations;
+      let searchResults = first.searchResults;
       let searchCount = searchesOf(message);
 
       for (let i = 0; i < MAX_PAUSE_CONTINUATIONS && message.stop_reason === "pause_turn"; i += 1) {
@@ -51,10 +53,11 @@ export class ClaudeProviderClient implements ProviderClient {
         text += partial.content;
         searchCount += searchesOf(message);
         citations = dedupeByUrl([...citations, ...partial.citations]);
+        searchResults = dedupeByUrl([...searchResults, ...partial.searchResults]);
       }
 
       const final = toProviderResponse(message, Date.now() - startedAt);
-      return { ...final, content: text, citations, webSearchCount: searchCount };
+      return { ...final, content: text, citations, searchResults, webSearchCount: searchCount };
     } catch (error) {
       // Normalize any Anthropic SDK error into a typed ProviderError.
       throw mapAnthropicError(error);

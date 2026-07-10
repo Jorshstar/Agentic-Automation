@@ -48,7 +48,8 @@
     "demo:memory": "tsx src/demos/memory-demo.ts",
     "demo:seo": "tsx src/demos/seo-demo.ts",
     "demo:thumbnail": "tsx src/demos/thumbnail-demo.ts",
-    "demo:stock": "tsx src/demos/stock-demo.ts"
+    "demo:stock": "tsx src/demos/stock-demo.ts",
+    "demo:historical": "tsx src/demos/historical-demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.0",

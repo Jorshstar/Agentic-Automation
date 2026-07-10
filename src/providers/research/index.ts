@@ -13,4 +13,12 @@ export type {
   ResearchReference,
   ResearchResultMetadata,
   ResearchResult,
+  ResearchPackage,
+  ResearchClaim,
+  ResearchTheory,
+  ResearchTimelineEntry,
+  HistoricalEra,
+  ClaimType,
+  ClaimConfidence,
 } from "./types.js";
+export { HISTORICAL_ERAS, CLAIM_TYPES } from "./types.js";

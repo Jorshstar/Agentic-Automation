@@ -14,6 +14,12 @@ export interface NarrativeContext {
   readonly language: string;
   readonly platform: string;
   readonly targetDurationSeconds: number;
+  /**
+   * Override the scriptwriter's system prompt (role + rules). Lets a niche swap
+   * in its own persona — e.g. scary stories open on a verified shocking fact and
+   * may never invent details.
+   */
+  readonly systemPromptId?: string;
 }
 
 /** What the caller asks the narrator to turn into a script. */

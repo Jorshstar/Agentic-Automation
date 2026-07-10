@@ -116,6 +116,7 @@ export class DefaultAIKernel implements AIKernel {
       },
       latencyMs: response.latencyMs,
       citations: response.citations,
+      searchResults: response.searchResults,
       webSearchCount: response.webSearchCount,
     };
   }

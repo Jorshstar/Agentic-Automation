@@ -36,7 +36,11 @@ export function toProviderResponse(
     },
     finishReason: mapFinishReason(message.stop_reason),
     latencyMs,
+    // CITED = the model grounded prose in it. RETRIEVED = the search fetched it,
+    // including pages the model explored and discarded. Keep them separate: a
+    // retrieved page is real, but it is not evidence the answer used it.
     citations: extractCitations(message),
+    searchResults: dedupe(extractSearchResults(message)),
     webSearchCount: message.usage.server_tool_use?.web_search_requests ?? 0,
     raw: message,
   };
@@ -86,6 +90,30 @@ function extractCitations(message: Anthropic.Message): readonly ProviderCitation
     }
   }
   return [...byUrl.values()];
+}
+
+/**
+ * The pages the web search actually retrieved. Used when the model's answer is
+ * structured (JSON) and therefore carries no inline citations. `content` is an
+ * error object rather than a list when the search failed — hence the Array check.
+ */
+function extractSearchResults(message: Anthropic.Message): readonly ProviderCitation[] {
+  const found: ProviderCitation[] = [];
+  for (const block of message.content) {
+    if (block.type !== "web_search_tool_result" || !Array.isArray(block.content)) {
+      continue;
+    }
+    for (const result of block.content) {
+      if (result.type === "web_search_result") {
+        found.push({ url: result.url, title: result.title || result.url });
+      }
+    }
+  }
+  return found;
+}
+
+function dedupe(citations: readonly ProviderCitation[]): readonly ProviderCitation[] {
+  return [...new Map(citations.map((c) => [c.url, c])).values()];
 }
 
 function mapFinishReason(stopReason: Anthropic.Message["stop_reason"]): FinishReason {

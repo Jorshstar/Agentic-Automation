@@ -21,8 +21,9 @@ import type { RunSettings } from "../config/niche-context.js";
 import { claudeCostUsd, imagesCostUsd, ttsCostUsd, webSearchCostUsd } from "../config/pricing.js";
 import { RunLedger, makeRunId } from "./run-ledger.js";
 import { ClaudeTopicGenerationProvider } from "../providers/topic-generation/index.js";
-import { createTopicHistoryStore, normalizeTitle } from "./topic-history.js";
+import { createTopicHistoryStore, normalizeTitle, recentCountries, recentEras } from "./topic-history.js";
 import { ClaudeResearchProvider } from "../providers/research/index.js";
+import type { ResearchPackage } from "../providers/research/index.js";
 import { ClaudeContentPlanningProvider } from "../providers/content-planning/index.js";
 import { ClaudeNarrativeProvider } from "../providers/narrative/index.js";
 import type { NarrativeScript } from "../providers/narrative/index.js";
@@ -172,11 +173,21 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
   const runDir = ledger.runDir;
   log(`▶ Run ${runId}${format !== "narrated-short" ? ` · format: ${format}` : ""}${options.resumeRunId ? "  (resuming — completed stages will be skipped)" : ""}`);
 
-  // --- 1. Topic (auto or explicit), with MEMORY so we never repeat ---
   const history = createTopicHistoryStore();
+
+  // Scary stories are HISTORICAL research: the researcher itself selects a real,
+  // verifiable event (rotating country + era against memory), so the topic stage
+  // is skipped and the chosen event's name becomes the topic.
+  const historical = niche === "scary-stories";
+
+  // --- 1. Topic (auto or explicit), with MEMORY so we never repeat ---
   const topicStage = await ledger.stage<TopicCheckpoint>(
     "topic",
     async () => {
+      if (historical) {
+        // The historical researcher picks the event in the next stage.
+        return { title: "", angle: "", hook: "", keywords: [], costUsd: 0 };
+      }
       if (options.topic) {
         return { title: options.topic, angle: "", hook: "", keywords: [], costUsd: 0 };
       }
@@ -218,19 +229,38 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
     },
     (r) => r.costUsd,
   );
-  const { title, angle, hook, keywords } = topicStage;
-  await ledger.setTopic(title);
-  log(`   Topic: "${title}"`);
+  if (!historical) {
+    await ledger.setTopic(topicStage.title);
+    log(`   Topic: "${topicStage.title}"`);
+  }
 
   // --- 2. Research (LIVE web search — real, cited sources) ---
   const research = await ledger.stage(
     "research",
     async () => {
+      const provider = new ClaudeResearchProvider(kernel, buildResearchContext(profile, run));
+
+      if (historical) {
+        log("① Researching a real historical event (picking + verifying it)...");
+        const past = await history.recent(40);
+        const result = await provider.research({
+          topic: options.topic ?? options.instructions ?? "",
+          historical: true,
+          avoidTopics: past.map((t) => t.title),
+          // HARD ROTATION: the last few countries/eras are forbidden outright.
+          avoidCountries: recentCountries(past, 6),
+          avoidEras: recentEras(past, 3),
+        });
+        const pkg = result.package;
+        log(`   "${pkg?.eventName ?? "?"}" — ${pkg?.country ?? "?"}, ${pkg?.era ?? "?"} (${result.metadata.webSearchCount ?? 0} searches, ${result.references.length} sources).`);
+        return result;
+      }
+
       log("② Researching (searching the live web)...");
-      const result = await new ClaudeResearchProvider(kernel, buildResearchContext(profile, run)).research({
-        topic: title,
-        angle: angle || undefined,
-        keywords,
+      const result = await provider.research({
+        topic: topicStage.title,
+        angle: topicStage.angle || undefined,
+        keywords: topicStage.keywords,
       });
       log(`   ${result.metadata.webSearchCount ?? 0} searches, ${result.references.length} sources cited.`);
       return result;
@@ -239,6 +269,17 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
   );
   collect(warnings, research.warnings.map((w) => `research: ${w}`));
 
+  // For historical runs the event the researcher chose IS the topic. Its most
+  // shocking verified fact becomes the hook the narrator opens on.
+  const pkg = research.package;
+  const title = historical ? pkg?.eventName || options.topic || "An unexplained historical event" : topicStage.title;
+  const angle = historical ? (pkg?.whyDebated ?? "") : topicStage.angle;
+  const hook = historical ? (pkg?.shockingFact ?? "") : topicStage.hook;
+  const keywords = historical ? historicalKeywords(pkg) : topicStage.keywords;
+  if (historical) {
+    await ledger.setTopic(title);
+  }
+
   // --- 3. Content plan ---
   const contentPlan = await ledger.stage(
     "content-plan",
@@ -246,7 +287,10 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
       log("③ Planning content...");
       return new ClaudeContentPlanningProvider(kernel, buildContentPlanContext(profile, run)).plan({
         topic: title,
-        research,
+        // Historical runs carry the structured package forward as briefing text,
+        // so the planner (and then the narrator) sees the shocking fact, the
+        // official explanation, and exactly what remains unexplained.
+        research: historical && pkg ? { ...research, summary: historicalBriefing(pkg) } : research,
       });
     },
     (r) => claudeCostUsd(r.metadata.tokenUsage),
@@ -649,7 +693,14 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
   //         a resume never records the same topic twice. ---
   if (exported.exportedVideo !== "") {
     await ledger.stage("record-topic", async () => {
-      await history.add({ title, niche, date: new Date().toISOString().slice(0, 10) });
+      // Country + era feed HARD ROTATION on the next historical run.
+      await history.add({
+        title,
+        niche,
+        date: new Date().toISOString().slice(0, 10),
+        ...(pkg?.country ? { country: pkg.country } : {}),
+        ...(pkg?.era ? { era: pkg.era } : {}),
+      });
       return { recorded: true };
     });
   }
@@ -740,6 +791,48 @@ function sceneImagePlan(narrative: NarrativeScript, profile: NicheProfile): Asse
       latencyMs: 0,
     },
   };
+}
+
+/**
+ * Flatten the research package into a briefing the planner/narrator can read.
+ * Keeps the evidence distinctions the researcher was careful to draw, so the
+ * narrator can't quietly upgrade a theory into a fact.
+ */
+function historicalBriefing(pkg: ResearchPackage): string {
+  const lines = [
+    `EVENT: ${pkg.eventName} — ${pkg.location}, ${pkg.country} (${pkg.period})`,
+    ``,
+    `MOST SHOCKING VERIFIED FACT (open on this): ${pkg.shockingFact}`,
+    ``,
+    `BACKGROUND: ${pkg.background}`,
+    ``,
+    `TIMELINE:`,
+    ...pkg.timeline.map((t) => `- ${t.when}: ${t.what}`),
+    ``,
+    `OFFICIAL EXPLANATION: ${pkg.officialExplanation}`,
+    ``,
+    `ALTERNATIVE THEORIES:`,
+    ...pkg.alternativeTheories.map((t) => `- ${t.theory} (${t.proponents}) — evidence: ${t.evidence}`),
+    ``,
+    `WHY EXPERTS STILL DEBATE IT: ${pkg.whyDebated}`,
+    ``,
+    `STILL UNEXPLAINED:`,
+    ...pkg.unexplainedFacts.map((f) => `- ${f}`),
+    ``,
+    `EVIDENCE GRADING (do NOT state a low-confidence claim as fact):`,
+    ...pkg.claims.map((c) => `- [${c.type}, confidence ${c.confidence}] ${c.claim}`),
+  ];
+  return lines.join("\n");
+}
+
+/** SEO/stock keywords for a historical run: place, era, and the people involved. */
+function historicalKeywords(pkg: ResearchPackage | undefined): readonly string[] {
+  if (!pkg) {
+    return [];
+  }
+  return [pkg.country, pkg.era.replace(/-/gu, " "), ...pkg.peopleInvolved.slice(0, 2)]
+    .map((k) => k.trim())
+    .filter((k) => k !== "" && k.toLowerCase() !== "unknown");
 }
 
 /* ------------------------------ stock-video helpers ------------------------------ */
