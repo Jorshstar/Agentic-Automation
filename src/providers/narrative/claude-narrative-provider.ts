@@ -78,6 +78,9 @@ export class ClaudeNarrativeProvider implements NarrativeProvider {
         // demanded 134 — six wasted retries and a sped-up narration.
         minWords: context.minWords ?? Math.round(targetDuration * 2.4),
         maxWords: context.maxWords ?? Math.round(targetDuration * 2.55),
+        // ~8s per scene keeps captions tight and visuals moving.
+        minSegments: context.minSegments ?? Math.max(4, Math.round(targetDuration / 10)),
+        maxSegments: context.maxSegments ?? Math.max(6, Math.round(targetDuration / 7)),
         platform: context.platform,
         language: context.language,
       },

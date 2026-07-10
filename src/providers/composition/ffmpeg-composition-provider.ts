@@ -86,9 +86,12 @@ export class FfmpegCompositionProvider implements CompositionProvider {
       // → colour card. Each step degrades gracefully, never straight to black.
       let rendered = false;
       if (image?.videoPath) {
-        // Real footage: scale/crop to frame, loop if shorter than the scene, trim
-        // to the narration duration, drop the clip's own audio.
-        rendered = (await runFfmpeg(stockClipArgs(image.videoPath, duration, ctx, clipPath))).ok;
+        // Real footage. A stock clip is usually SHORTER than the scene; hard-
+        // looping it cuts back to frame 1 mid-scene (the visible "skip"). So
+        // measure it and, when short, SLOW it to fill smoothly (up to a cap that
+        // still looks natural). Only loop when the clip is far too short.
+        const sourceSeconds = (await probeDurationSeconds(image.videoPath)) ?? 0;
+        rendered = (await runFfmpeg(stockClipArgs(image.videoPath, duration, sourceSeconds, ctx, clipPath))).ok;
         if (!rendered) {
           warnings.push({ code: "clip-failed", message: "Stock clip failed; falling back.", segmentId: segment.segmentId });
         }
@@ -324,23 +327,45 @@ function staticImageClipArgs(
   ];
 }
 
+/** How far a short clip may be slowed to fill a scene before it looks like slow
+ *  motion. Beyond this we loop the remainder (a seam, but rare). */
+const MAX_STOCK_STRETCH = 2.2;
+
 /**
- * A real stock-footage clip normalized to the scene: loop if the source is
- * shorter than the narration, scale-crop to fill the vertical frame, trim to the
- * exact scene duration, force fps, and DROP the clip's own audio (the narration
- * is the only audio). `-stream_loop -1` before the input repeats it as needed.
+ * A real stock-footage clip normalized to the scene. Scale-crop to fill the
+ * vertical frame, DROP the clip's audio, force fps, trim to the exact scene
+ * length. The important part: when the source is SHORTER than the scene it is
+ * slowed (setpts) to fill smoothly instead of hard-looping — no jump-cut back to
+ * frame 1. Only a clip shorter than scene/MAX_STOCK_STRETCH still loops.
  */
-function stockClipArgs(videoPath: string, duration: number, ctx: CompositionContext, clipPath: string): string[] {
+function stockClipArgs(
+  videoPath: string,
+  duration: number,
+  sourceSeconds: number,
+  ctx: CompositionContext,
+  clipPath: string,
+): string[] {
   const durStr = duration.toString();
+  const needsFill = sourceSeconds > 0 && sourceSeconds < duration;
+  // Slow factor to stretch source→scene, capped so it never crawls.
+  const stretch = needsFill ? Math.min(duration / sourceSeconds, MAX_STOCK_STRETCH) : 1;
+  // Loop only if even max-stretch can't fill the scene.
+  const loop = needsFill && duration / sourceSeconds > MAX_STOCK_STRETCH;
+
+  const filters = [
+    `scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=increase`,
+    `crop=${ctx.width}:${ctx.height}`,
+    ...(stretch > 1.001 ? [`setpts=${stretch.toFixed(4)}*PTS`] : []),
+    "format=yuv420p",
+    `fps=${ctx.fps}`,
+  ].join(",");
+
   return [
     "-y",
-    "-stream_loop", "-1",
+    ...(loop ? ["-stream_loop", "-1"] : []),
     "-i", videoPath,
-    "-t", durStr,
     "-an",
-    "-vf",
-    `scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=increase,` +
-      `crop=${ctx.width}:${ctx.height},format=yuv420p,fps=${ctx.fps}`,
+    "-vf", filters,
     "-r", String(ctx.fps),
     "-c:v", "libx264",
     "-preset", "veryfast",

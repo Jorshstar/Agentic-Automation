@@ -134,9 +134,11 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
         template:
           "You write narration for TRUE historical horror on {{platform}}. The story is real. " +
           "That is the whole point — it frightens because it happened.\n\n" +
-          "OPENING RULE: open on the single most shocking TRUE fact of the story. " +
-          "\"Did you know that...\" is allowed, but any opening that stops a viewer mid-scroll is " +
-          "better. Real place. Real year. Real people. Name them in the first two sentences.\n\n" +
+          "OPENING RULE: by DEFAULT, open with \"Did you know that...\" followed by the single most " +
+          "shocking TRUE fact of the story — real place, real year, real people. Use this opening " +
+          "most of the time. Only deviate when a different hook is clearly stronger, and even then " +
+          "it must lead with a shocking verified fact in the first sentence. Name the place, year, " +
+          "and people within the first two sentences.\n\n" +
           "Rules:\n" +
           "- NEVER invent a detail. No invented dialogue, names, dates, or deaths. Every fact you " +
           "narrate must appear in the research you were given.\n" +
@@ -228,9 +230,13 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
         version: "v1",
         status: "stable",
         template:
-          "Research ONE real historical mystery, unexplained event, disappearance, archaeological " +
-          "anomaly, government investigation, scientific anomaly, documented incident, death, " +
-          "unsolved historical mystery, or bizarre historical coincidence.\n\n" +
+          "Research ONE real, FRIGHTENING historical event — the kind that makes people shiver and " +
+          "want to look it up themselves. Choose from: an unsolved historical mystery, an " +
+          "unexplained event, a disappearance, an archaeological anomaly, a disturbing government " +
+          "investigation, a scientific anomaly, mysterious deaths or a mass death, or a bizarre, " +
+          "unsettling historical coincidence. It must be genuinely eerie, dark, or disturbing — " +
+          "frightening because it is TRUE, not because it is embellished. Avoid ordinary disasters " +
+          "with mundane, fully-settled explanations; favour events where something remains unknown.\n\n" +
           "ASSIGNMENT: {{directive}}\n" +
           "(If the assignment is \"none\", choose the event yourself using the rules below. " +
           "Otherwise the assignment names the event — research THAT event.)\n\n" +
@@ -563,6 +569,8 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
         "targetDurationSeconds",
         "minWords",
         "maxWords",
+        "minSegments",
+        "maxSegments",
         "platform",
         "language",
       ],
@@ -584,10 +592,14 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "Core message: {{coreMessage}}\n" +
           "Call to action: {{callToAction}}\n\n" +
           "Sections (in order):\n{{sections}}\n\n" +
-          "Turn each section into one or more timed narration segments. The segments must form a " +
+          "Turn each section into timed narration segments. The segments must form a " +
           "continuous timeline starting at 0 and ending as close as possible to " +
           "{{targetDurationSeconds}} seconds (no gaps, no overlaps). Remember the hard word limit " +
           "above ({{minWords}}-{{maxWords}} words total).\n\n" +
+          "IMPORTANT — keep each segment SHORT: 1-2 sentences, roughly 6-10 seconds each. Aim for " +
+          "{{minSegments}}-{{maxSegments}} segments total. Short segments keep the captions in sync " +
+          "with the voice and let the visuals change often. Split a long thought into two segments " +
+          "rather than writing one long one.\n\n" +
           "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
           "{\n" +
           "  \"hook\": string,\n" +

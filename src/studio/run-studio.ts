@@ -517,8 +517,11 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
   const voiceover = await ledger.stage(
     "voice",
     async () => {
-      const measuredFloor = run.targetDurationSeconds * 0.92;
-      const measuredCeiling = run.targetDurationSeconds * 1.08;
+      // Only speed-correct when the narration is genuinely off. A wide window
+      // means a natural (unhurried) read is kept AS IS rather than sped up — the
+      // artificial speed-up is exactly what made the voice sound too fast.
+      const measuredFloor = run.targetDurationSeconds * 0.85;
+      const measuredCeiling = run.targetDurationSeconds * 1.18;
 
       // ---- PODCAST: every turn in ITS host's voice, stitched on one timeline ----
       if (format === "podcast" && cast.length === 2 && turns.length > 0) {

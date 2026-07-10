@@ -28,6 +28,10 @@ export interface NarrativeContext {
    */
   readonly minWords?: number;
   readonly maxWords?: number;
+  /** Target segment COUNT window. Short segments keep captions in sync and the
+   *  visuals changing; derived from the duration (~8s per scene). */
+  readonly minSegments?: number;
+  readonly maxSegments?: number;
 }
 
 /** What the caller asks the narrator to turn into a script. */

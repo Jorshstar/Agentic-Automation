@@ -61,7 +61,7 @@ export interface RunSettings {
 export function wordsPerSecond(pacing: NicheProfile["pacing"]): number {
   switch (pacing) {
     case "slow":
-      return 1.95;
+      return 1.8;
     case "fast":
       return 2.55;
     case "medium":
@@ -295,8 +295,10 @@ export function buildQaContext(
     // Platform window derived from the run's target so briefs with any duration
     // work (65s target → 60/72, matching the user's Shorts rule; a 90s brief →
     // 83/100). Violations BLOCK delivery.
-    minDurationSeconds: Math.round(run.targetDurationSeconds * 0.92),
-    maxDurationSeconds: Math.round(run.targetDurationSeconds * 1.11),
+    // Wide enough that a natural, unhurried narration is publishable without an
+    // artificial speed-up (matches the voice stage's re-synth window).
+    minDurationSeconds: Math.round(run.targetDurationSeconds * 0.85),
+    maxDurationSeconds: Math.round(run.targetDurationSeconds * 1.2),
     requireAudio: true,
     minSizeBytes: 50_000,
   };
