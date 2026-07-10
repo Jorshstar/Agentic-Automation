@@ -511,21 +511,26 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
             return false;
           };
 
-          // Scary: try only VIDEO from stock (the still scenes become AI horror
-          // images). Other niches: alternate video/photo for documentary rhythm.
-          const found = !useStockPhotos
-            ? await tryVideo()
-            : wantsVideoFirst
-              ? (await tryVideo()) || (await tryPhoto())
-              : (await tryPhoto()) || (await tryVideo());
-          if (!found) {
-            // Nothing real yet — the broadened pass or OpenAI covers it below.
+          // Scary: alternate on PURPOSE. Odd scenes are RESERVED for a dark,
+          // scene-matched AI horror image (scary + exactly aligned to the words),
+          // so they are skipped here and generated below. Even scenes use real
+          // stock VIDEO for motion, falling back to AI if stock has nothing.
+          // Other niches: alternate stock video/photo for documentary rhythm.
+          if (!useStockPhotos) {
+            if (wantsVideoFirst) {
+              await tryVideo(); // even scene → real motion (else AI horror below)
+            }
+            // odd scene → left uncovered on purpose → AI horror image below
+          } else if (wantsVideoFirst) {
+            (await tryVideo()) || (await tryPhoto());
+          } else {
+            (await tryPhoto()) || (await tryVideo());
           }
         }
-        // SECOND PASS — keep it real: for any scene still uncovered, retry with a
-        // BROADER, more generic query (and a niche atmosphere term) before paying
-        // OpenAI. Real stock is strongly preferred; AI images are the last resort.
-        for (const [i, segment] of narrative.segments.entries()) {
+        // SECOND PASS — non-scary only: for any scene still uncovered, retry with
+        // a BROADER query before paying OpenAI (real stock strongly preferred).
+        // Scary deliberately leaves its reserved scenes for AI horror images.
+        for (const [i, segment] of (useStockPhotos ? narrative.segments : []).entries()) {
           const segmentId = `seg-${i + 1}`;
           if (stockClips.has(segmentId) || stockPhotos.has(segmentId)) {
             continue;
