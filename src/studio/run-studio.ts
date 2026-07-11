@@ -337,10 +337,12 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
       // Derived from the run's target so ANY brief duration works (65s → 140-158
       // words; 90s → 198-215). Floor biased up so an undershoot still clears it.
       const wps = wordsPerSecond(profile.pacing);
+      // Wider upper bound: single-sentence beats tend to overshoot, and burning
+      // six retries to shave a few words costs more than the slightly longer read.
       const wordsMin = Math.round((run.targetDurationSeconds - 4) * wps);
-      const wordsMax = Math.round((run.targetDurationSeconds + 3.5) * wps);
+      const wordsMax = Math.round((run.targetDurationSeconds + 10) * wps);
       const targetWords = Math.round(run.targetDurationSeconds * wps);
-      const maxNarrativeAttempts = 6;
+      const maxNarrativeAttempts = 3;
       let costUsd = 0;
 
       // ---- PODCAST format: a two-host conversation instead of one narrator ----
@@ -460,15 +462,16 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
       // stills. If the preferred medium misses, the other is tried, and only then
       // do we pay OpenAI. Cheaper than all-images, and it all reads as real.
       //
-      // SCARY EXCEPTION: free stock PHOTOS are calm and generic — useless for
-      // horror. So scary skips stock photos entirely: it uses real stock VIDEO
-      // where it fits (motion) and a dark, scene-matched AI HORROR image for the
-      // rest. That is the only way to get visuals that are both scary AND aligned.
-      const useStockPhotos = niche !== "scary-stories";
+      // SCARY EXCEPTION: free stock is bright and generic — a sunny beach clip
+      // mid-horror shatters the mood. So scary uses NO stock at all: every scene
+      // is a dark, scene-matched AI HORROR image (Ken-Burns motion). Consistent
+      // dread beats mismatched real motion. Other niches keep the stock mix.
+      const scary = niche === "scary-stories";
+      const useStockPhotos = !scary;
       const plan = sceneImagePlan(narrative, profile);
       const stockClips = new Map<string, string>();
       const stockPhotos = new Map<string, string>();
-      if (run.useStockVideo) {
+      if (run.useStockVideo && !scary) {
         log(`⑤ Sourcing real footage + photos for ${narrative.segments.length} scenes...`);
         const stock = new PexelsPixabayStockVideoProvider({
           ...buildStockVideoContext(run),

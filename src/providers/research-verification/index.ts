@@ -14,7 +14,7 @@ import type { ResearchPackage, ResearchClaim } from "../research/index.js";
  */
 
 const VERIFY_PROMPT_ID = "verify-research.user";
-const MAX_VERIFY_SEARCHES = 5;
+const MAX_VERIFY_SEARCHES = 3;
 
 export type ClaimStatus = "confirmed" | "unconfirmed" | "contradicted";
 

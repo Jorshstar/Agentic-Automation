@@ -44,7 +44,7 @@ const MAX_WEB_SEARCHES = 4;
  * into the context window, so this cap controls INPUT TOKENS far more than the
  * $0.01/search fee — 8 searches cost ~$0.68 a run, 5 keeps it near $0.30.
  */
-const MAX_HISTORICAL_SEARCHES = 5;
+const MAX_HISTORICAL_SEARCHES = 3;
 
 /** Sensible defaults for the context the agent doesn't provide. */
 const DEFAULT_RESEARCH_CONTEXT: ResearchContext = {
