@@ -41,6 +41,7 @@
     "studio:brief": "tsx src/demos/brief-demo.ts",
     "studio:brief:dry": "tsx src/demos/brief-demo.ts --dry",
     "studio:listen": "tsx src/telegram/listen.ts",
+    "studio:daily": "tsx src/studio/daily-scary.ts",
     "studio:dashboard": "tsx src/dashboard/server.ts",
     "studio:command": "tsx src/telegram/command-once.ts",
     "demo:deliver": "tsx src/demos/deliver-demo.ts",

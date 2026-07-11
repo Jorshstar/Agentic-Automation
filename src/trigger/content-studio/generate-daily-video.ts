@@ -1,7 +1,6 @@
 import { schedules } from "@trigger.dev/sdk";
 import type { VideoPackage } from "../../types/index.js";
 import { getNicheConfig } from "../../config/niches.js";
-import { getNicheForDate } from "../../lib/niche-rotation.js";
 import { runStudio } from "../../studio/run-studio.js";
 import type { StudioResult } from "../../studio/run-studio.js";
 import { buildUploadCaption } from "../../studio/upload-caption.js";
@@ -39,7 +38,10 @@ export const generateDailyVideo = schedules.task({
 
   run: async (payload, { ctx }): Promise<VideoPackage> => {
     const isoDate = payload.timestamp.toISOString().slice(0, 10);
-    const niche = getNicheForDate(isoDate);
+    // SCARY ONLY. The rotation across niches was retired — the daily video is
+    // always a true-history scary short (research picks the event, fact-checks it,
+    // dark AI horror visuals). The other niches are made on demand, not daily.
+    const niche = "scary-stories" as const;
     const nicheConfig = getNicheConfig(niche);
 
     logger.info("Daily content run started", {
