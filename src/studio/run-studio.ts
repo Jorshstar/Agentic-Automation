@@ -90,6 +90,13 @@ export interface StudioRunOptions {
   readonly runId?: string;
   /** Progress callback (defaults to console.log). */
   readonly onStep?: (message: string) => void;
+  /**
+   * User-supplied visuals (Telegram uploads), in the order they should appear.
+   * Each is assigned to a scene up front — a user photo behaves exactly like a
+   * pre-covered stock still, a user video like a stock clip — so the AI-fill step
+   * only generates the scenes the user's own media didn't cover. Local file paths.
+   */
+  readonly userAssets?: readonly { readonly path: string; readonly kind: "photo" | "video" }[];
 }
 
 export interface StudioResult {
@@ -471,6 +478,28 @@ export async function runStudio(options: StudioRunOptions): Promise<StudioResult
       const plan = sceneImagePlan(narrative, profile);
       const stockClips = new Map<string, string>();
       const stockPhotos = new Map<string, string>();
+
+      // USER-SUPPLIED VISUALS (Telegram uploads). Assign the user's own photos/
+      // videos to the first scenes IN ORDER, so they read as pre-covered scenes:
+      // a photo joins stockPhotos, a video joins stockClips. The AI-fill step
+      // below then only generates whatever scenes the user's media didn't cover.
+      // This is exactly the "use my pictures, AI fills the gaps" behaviour.
+      const userAssets = options.userAssets ?? [];
+      if (userAssets.length > 0) {
+        const placed = Math.min(userAssets.length, narrative.segments.length);
+        for (let i = 0; i < placed; i++) {
+          const asset = userAssets[i];
+          if (!asset) continue;
+          const segmentId = `seg-${i + 1}`;
+          if (asset.kind === "video") {
+            stockClips.set(segmentId, asset.path);
+          } else {
+            stockPhotos.set(segmentId, asset.path);
+          }
+        }
+        log(`⑤ Placed ${placed} of your uploaded asset(s); the AI fills the remaining ${narrative.segments.length - placed} scene(s).`);
+      }
+
       if (run.useStockVideo && !scary) {
         log(`⑤ Sourcing real footage + photos for ${narrative.segments.length} scenes...`);
         const stock = new PexelsPixabayStockVideoProvider({

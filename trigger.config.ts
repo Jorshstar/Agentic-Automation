@@ -1,5 +1,5 @@
 import { defineConfig } from "@trigger.dev/sdk";
-import { ffmpeg } from "@trigger.dev/build/extensions/core";
+import { ffmpeg, aptGet } from "@trigger.dev/build/extensions/core";
 
 /**
  * Trigger.dev project configuration.
@@ -43,6 +43,9 @@ export default defineConfig({
   // Install ffmpeg + ffprobe in the deployed container (Composition, Music, QA,
   // Voice all shell out to them). Without this, the cloud image has no ffmpeg.
   build: {
-    extensions: [ffmpeg()],
+    // ffmpeg + ffprobe for all rendering; yt-dlp for the clip automation's source
+    // download (installed from Debian in the deploy image). curl fetches the
+    // yt-dlp self-updater if the apt build lags a YouTube change.
+    extensions: [ffmpeg(), aptGet({ packages: ["yt-dlp", "curl"] })],
   },
 });

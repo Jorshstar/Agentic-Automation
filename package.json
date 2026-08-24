@@ -42,6 +42,7 @@
     "studio:brief:dry": "tsx src/demos/brief-demo.ts --dry",
     "studio:listen": "tsx src/telegram/listen.ts",
     "studio:daily": "tsx src/studio/daily-scary.ts",
+    "studio:clip-worker": "tsx src/clip/clip-worker.ts",
     "studio:dashboard": "tsx src/dashboard/server.ts",
     "studio:command": "tsx src/telegram/command-once.ts",
     "demo:deliver": "tsx src/demos/deliver-demo.ts",
@@ -50,7 +51,8 @@
     "demo:seo": "tsx src/demos/seo-demo.ts",
     "demo:thumbnail": "tsx src/demos/thumbnail-demo.ts",
     "demo:stock": "tsx src/demos/stock-demo.ts",
-    "demo:historical": "tsx src/demos/historical-demo.ts"
+    "demo:historical": "tsx src/demos/historical-demo.ts",
+    "demo:upload-inject": "tsx src/demos/upload-inject-demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.0",

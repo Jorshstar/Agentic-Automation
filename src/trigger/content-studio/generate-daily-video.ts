@@ -24,10 +24,12 @@ import { logger } from "../../lib/logger.js";
 export const generateDailyVideo = schedules.task({
   id: "generate-daily-video",
 
-  // FFmpeg video encoding needs real RAM — the default (~0.5 GB) OOM-kills the
-  // run at composition. medium-2x (4 GB) + the `-threads 2` cap in the composition
-  // provider (which stops x264 spawning one thread per HOST core) keeps it safe.
-  machine: "medium-2x",
+  // FFmpeg video encoding needs real RAM. medium-2x (4 GB) still OOM-killed the
+  // run at composition (12 normalized 1080x1920 clips + concat + x264). large-1x
+  // (8 GB) doubles the headroom; combined with the `-threads 2` cap in the
+  // composition provider (stops x264 spawning one thread per HOST core), the
+  // daily 1080x1920 compose fits comfortably.
+  machine: "large-1x",
 
   // Every day at 08:00 Nigeria time (Africa/Lagos, WAT). The timezone is explicit
   // so the post time is correct regardless of where the worker runs.

@@ -120,6 +120,8 @@ export async function loadResolvedBrief(runId: string): Promise<ResolvedBrief | 
 export interface RunBriefOptions {
   readonly resumeRunId?: string;
   readonly onStep?: (message: string) => void;
+  /** User-supplied visuals (Telegram uploads) to place before AI-fill, in order. */
+  readonly userAssets?: readonly { readonly path: string; readonly kind: "photo" | "video" }[];
 }
 
 /** Resolve and run a brief end-to-end (the plain-words entry point). */
@@ -170,5 +172,6 @@ export async function runResolvedBrief(
     ...(resolved.exactTitle ? { topic: resolved.instructions } : {}),
     ...(options.resumeRunId ? { resumeRunId: options.resumeRunId } : { runId }),
     ...(options.onStep ? { onStep: options.onStep } : {}),
+    ...(options.userAssets ? { userAssets: options.userAssets } : {}),
   });
 }

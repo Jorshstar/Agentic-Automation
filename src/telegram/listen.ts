@@ -10,6 +10,12 @@
  * SECURITY: only TELEGRAM_CHAT_ID may command the studio; all other chats are
  * ignored. Old messages are dropped at startup so a restart never replays
  * commands. Runs on this PC (keep it open); needs the usual .env keys.
+ *
+ * ⚠️ DEV-ONLY NOW. The always-on cloud task `telegram-ingest` is the LIVE
+ * consumer of the bot's updates. Telegram allows only ONE consumer, so running
+ * this local listener at the same time will STEAL updates from the cloud (and
+ * vice-versa). Only run this when the cloud `telegram-ingest` schedule is
+ * paused — e.g. local debugging.
  */
 import { TelegramClient } from "./telegram-client.js";
 import { StudioTelegramController } from "./controller.js";
@@ -25,6 +31,11 @@ async function main(): Promise<void> {
   const telegram = new TelegramClient();
   const controller = new StudioTelegramController(telegram);
 
+  console.warn(
+    "⚠️  DEV-ONLY: the cloud `telegram-ingest` schedule is the live consumer.\n" +
+      "    Running this while it's active will steal each other's messages.\n" +
+      "    Pause the cloud schedule before relying on this local listener.\n",
+  );
   let offset = await telegram.dropBacklog();
   await telegram.send("🎛 Studio online — tell me what to make. (say \"help\" for examples)");
   console.log("Listening for Telegram commands... (Ctrl+C to stop)");
