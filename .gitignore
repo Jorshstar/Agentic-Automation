@@ -5,6 +5,10 @@ node_modules/
 .env
 .env.local
 .env.*.local
+# Any other .env variant — including timestamped backups, which hold live keys.
+# .env.example is the documented template and is deliberately kept.
+.env.*
+!.env.example
 
 # Trigger.dev local artifacts
 .trigger/
