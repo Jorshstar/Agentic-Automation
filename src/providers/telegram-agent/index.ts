@@ -39,6 +39,12 @@ export interface AgentDecision {
    * say, which leaves the theme's default in place.
    */
   readonly layout: string;
+  /**
+   * Anything else they asked to be done TO the clip, in their own words — "add
+   * captions", "remove the watermark", "cut the pauses". Empty when they asked
+   * for none of it, which is the normal case: the clip comes back as footage.
+   */
+  readonly extras: string;
 }
 
 export class TelegramAgentProvider {
@@ -84,6 +90,7 @@ export class TelegramAgentProvider {
         theme: "auto",
         count: 5,
         layout: "",
+        extras: "",
       };
     }
   }
@@ -122,15 +129,16 @@ function parseDecision(output: unknown): AgentDecision {
     ? Math.min(Math.max(Math.round(root["count"]), 1), 8)
     : 5;
   const layout = typeof root["layout"] === "string" ? root["layout"].trim().slice(0, 80) : "";
+  const extras = typeof root["extras"] === "string" ? root["extras"].trim().slice(0, 120) : "";
 
   // Guards: never act without what the action needs.
   if (action === "build" && brief === "") {
-    return { reply, action: "chat", brief: "", useAssets, url: "", theme, count, layout };
+    return { reply, action: "chat", brief: "", useAssets, url: "", theme, count, layout, extras };
   }
   // NOTE: a "clip" with an empty url is NOT downgraded here. The user may have
   // uploaded the video into the chat instead of sharing a link, and only the
   // caller knows whether an upload is attached. The caller does that check.
-  return { reply, action, brief, useAssets, url, theme, count, layout };
+  return { reply, action, brief, useAssets, url, theme, count, layout, extras };
 }
 
 /**

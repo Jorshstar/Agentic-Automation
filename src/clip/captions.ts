@@ -175,7 +175,16 @@ export function buildAss(input: BuildAssInput): string {
   const events: string[] = [];
 
   if (input.hook && input.hook.trim() !== "") {
-    events.push(hookEvent(input.hook, preset, Math.min(HOOK_SECONDS, input.durationSeconds)));
+    events.push(
+      hookEvent(
+        input.hook,
+        preset,
+        Math.min(HOOK_SECONDS, input.durationSeconds),
+        // Characters that actually FIT: a fixed 22 overflowed a 576px-wide
+        // frame and the title ran off both edges.
+        maxHookChars(input.width - marginH * 2, hookSize),
+      ),
+    );
   }
   events.push(...captionEvents(input.words, preset, input.durationSeconds));
 
@@ -263,8 +272,17 @@ export function groupLines(words: readonly CaptionWord[], preset: CaptionPreset)
 
 /* --------------------------------- hook --------------------------------- */
 
-function hookEvent(hook: string, preset: CaptionPreset, seconds: number): string {
-  const text = wrapHook(sanitize(preset.uppercase ? hook.toUpperCase() : hook));
+/**
+ * How many characters fit on one line at this font size. 0.55em is a reasonable
+ * average advance width for a bold sans face; erring small keeps text inside the
+ * frame, which matters more than packing the line.
+ */
+function maxHookChars(usableWidth: number, fontSize: number): number {
+  return Math.max(8, Math.floor(usableWidth / (fontSize * 0.55)));
+}
+
+function hookEvent(hook: string, preset: CaptionPreset, seconds: number, maxChars: number): string {
+  const text = wrapHook(sanitize(preset.uppercase ? hook.toUpperCase() : hook), maxChars);
   // Fade in fast, out slower, so it never fights the first spoken words.
   return `Dialogue: 1,${assTime(0)},${assTime(seconds)},Hook,,0,0,0,,{\\fad(220,320)}${text}`;
 }

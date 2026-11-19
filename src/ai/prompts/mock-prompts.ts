@@ -1428,6 +1428,10 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "LAYOUT: if they say anything about how the clip should LOOK — 'full screen', 'show the " +
           "whole video', 'don't cut the sides', 'zoom in on him', 'like TikTok' — copy those words " +
           "into `layout`. Leave `layout` as \"\" when they said nothing about it. Never invent one.\n" +
+          "EXTRAS: if they ask for anything to be done TO the clip — 'add captions', 'with " +
+          "subtitles', 'remove the watermark', 'take off the caption', 'cut the pauses' — copy those " +
+          "words into `extras`. Leave `extras` as \"\" otherwise. This matters: nothing is added to a " +
+          "clip unless they asked, so inventing an extra changes their video without permission.\n" +
           "The THEME is the important part and it can be anything: 'the goals', 'funniest moments', " +
           "'the emotional bits', 'key insights', 'every knockout', 'the arguments'. Pass the user's " +
           "own words through — do not flatten them to a generic label. Use \"auto\" only when they " +

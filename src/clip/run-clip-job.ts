@@ -77,6 +77,20 @@ export interface ClipJob {
    * ("remove the caption", "take off the watermark").
    */
   readonly removeOverlays?: boolean | string;
+  /**
+   * Burn word-by-word subtitles and a title card onto the clip.
+   *
+   * OFF unless asked for. Captions are an edit, not a feature of the source, and
+   * adding them to a clip nobody asked to have captioned means handing back
+   * something that is not the video the user wanted. Accepts true, or their own
+   * words ("add captions", "with subtitles").
+   */
+  readonly captions?: boolean | string;
+  /**
+   * Cut dead air and filler sounds out of the clip. Also OFF unless asked for,
+   * for the same reason: it removes footage, so it changes the clip.
+   */
+  readonly tighten?: boolean | string;
 }
 
 export interface RenderedClip {
@@ -121,6 +135,11 @@ export async function runClipJob(
   const log = opts.onStep ?? (() => {});
   const plan = planForTheme(job.theme);
   const count = Math.min(Math.max(job.count || 5, 1), MAX_CLIPS);
+
+  // Everything that ADDS to or CHANGES the clip is opt-in. A clip nobody asked
+  // to have captioned should come back as the footage, not as an edit of it.
+  const wantsCaps = optedIn(job.captions, wantsCaptions, plan.theme);
+  const wantsTighten = optedIn(job.tighten, wantsTightening, plan.theme);
 
   // Check the tooling BEFORE anything expensive. A missing ffmpeg used to
   // surface as a bare ENOENT after the source had already been downloaded.
@@ -188,7 +207,9 @@ export async function runClipJob(
 
   /* ------------------- 5. exact word timings, chosen windows ------------------- */
   let words: readonly TranscriptWord[] = selection.words;
-  if (words.length === 0 && wordCount > 0) {
+  // Exact word timings exist to drive captions and dead-air trimming. With both
+  // off there is nothing to spend Whisper on.
+  if (words.length === 0 && wordCount > 0 && (wantsCaps || wantsTighten)) {
     log("📝 Transcribing just the selected moments…");
     const windowed = await transcribeWindows(
       source.videoPath,
@@ -254,15 +275,16 @@ export async function runClipJob(
       sourcePath: source.videoPath,
       startSecond: moment.startSecond,
       endSecond: moment.endSecond,
-      words,
+      words: wantsCaps ? words : [],
       outPath,
       assPath: join(opts.workDir, `clip-${index + 1}.ass`),
       reframe,
       captionPreset,
-      hook: moment.hook,
+      hook: wantsCaps ? moment.hook : undefined,
       removeOverlays: overlays,
-      // Dead air is only dead when someone is supposed to be talking.
-      tighten: mode !== "action",
+      // Dead air is only dead when someone is supposed to be talking, and only
+      // worth cutting when the user asked for a tighter clip.
+      tighten: wantsTighten && mode !== "action",
     });
     if (!result.ok) {
       log(`   ⚠️ Clip ${index + 1} failed to render.`);
@@ -466,6 +488,37 @@ function formatTimestamp(seconds: number): string {
  * Whether the user asked for the original poster's burned-in graphics to go.
  * Matched on the user's own words so no flag has to be learned.
  */
+/**
+ * Did the user ask for subtitles? Nothing is burned onto a clip unless they did.
+ * "remove the caption" must NOT match — that is about the SOURCE's own burned-in
+ * text, and is handled by wantsOverlaysGone.
+ */
+export function wantsCaptions(text: string): boolean {
+  if (wantsOverlaysGone(text)) return false;
+  return /\b(add|with|put|include|burn|want|need|give me)\b[^.]{0,20}\b(caption|captions|subtitle|subtitles|sub|subs|text)\b/iu.test(
+    text,
+  );
+}
+
+/** Did the user ask for the pauses cut out? */
+export function wantsTightening(text: string): boolean {
+  return /\b(tighten|tight|punch|snappy|cut (the )?(dead ?air|pauses|silence)|remove (the )?(dead ?air|pauses|silence)|no (dead ?air|pauses)|trim (the )?(pauses|silence))\b/iu.test(
+    text,
+  );
+}
+
+/** A per-job flag wins; otherwise look for the request in the user's own words. */
+function optedIn(
+  flag: boolean | string | undefined,
+  matcher: (text: string) => boolean,
+  theme: string,
+): boolean {
+  if (flag === true) return true;
+  if (flag === false) return false;
+  if (typeof flag === "string" && flag.trim() !== "") return matcher(flag);
+  return matcher(theme);
+}
+
 export function wantsOverlaysGone(text: string): boolean {
   return /\b(remove|delete|erase|take off|get rid of|hide|clean|without|no)\b[^.]{0,30}\b(caption|captions|title|titles|text|watermark|overlay|logo|banner|subtitle|subtitles|writing)\b/iu.test(
     text,

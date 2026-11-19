@@ -46,6 +46,8 @@ export const clipVideo = task({
           reframe: payload.reframe,
           captionPreset: payload.captionPreset,
           removeOverlays: payload.removeOverlays,
+          captions: payload.captions,
+          tighten: payload.tighten,
         },
         {
           workDir,
@@ -100,6 +102,10 @@ export interface ClipVideoPayload {
   readonly captionPreset?: CaptionPresetName;
   /** Erase the original poster's burned-in title card, watermark or banner. */
   readonly removeOverlays?: boolean | string;
+  /** Burn subtitles and a title card. Off unless asked for. */
+  readonly captions?: boolean | string;
+  /** Cut dead air out of the clip. Off unless asked for. */
+  readonly tighten?: boolean | string;
 }
 
 export interface ClipVideoResult {
