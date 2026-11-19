@@ -83,6 +83,26 @@ if (-not (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue)) {
 
 Write-Stamp "=== studio autostart starting (project: $ProjectDir) ===" $AutostartLog
 
+# --- clear leftovers -------------------------------------------------------
+# Stop-ScheduledTask kills this supervisor but NOT the node children it spawned,
+# so a restart finds the old processes still holding the log files open. Appending
+# to a locked file then fails, which tears down the new child's pipeline the
+# instant it starts — a restart loop with no obvious cause.
+#
+# Only processes whose command line points at THIS project are touched, so other
+# node work on the machine is left alone.
+try {
+    $stale = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+             Where-Object { $_.CommandLine -and $_.CommandLine -like "*$ProjectDir*" -and $_.ProcessId -ne $PID }
+    foreach ($proc in $stale) {
+        Write-Stamp "stopping leftover node process $($proc.ProcessId) from a previous run" $AutostartLog
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    if ($stale) { Start-Sleep -Seconds 2 }  # let the file handles close
+} catch {
+    Write-Stamp "could not check for leftover processes: $($_.Exception.Message)" $AutostartLog
+}
+
 # --- supervision -----------------------------------------------------------
 $jobs = @()
 foreach ($svc in @(
@@ -103,6 +123,10 @@ foreach ($svc in @(
         # every logged line comes out as 's p a c e d   t e x t'.
         $OutputEncoding = [System.Text.UTF8Encoding]::new()
         [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+        # Node writes UTF-8; without this PowerShell decodes it as the ANSI code
+        # page and every non-ASCII character arrives as mojibake.
+        [Console]::InputEncoding = [System.Text.UTF8Encoding]::new()
+        $env:PYTHONIOENCODING = 'utf-8'
 
         $logFile  = Join-Path $LogDir "$Name.log"
         $autostart = Join-Path $LogDir 'autostart.log'
@@ -125,8 +149,18 @@ foreach ($svc in @(
             # and preserves error records verbatim, which is what produced the
             # unreadable logs this replaced.
             & $npm run --silent $Script 2>&1 |
-                ForEach-Object { $_.ToString() } |
-                Out-File -FilePath $logFile -Append -Encoding utf8
+                ForEach-Object {
+                    # An ErrorRecord stringifies to its type name, which is
+                    # useless in a log; its message is the part worth keeping.
+                    if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message }
+                    else { "$_" }
+                } |
+                ForEach-Object {
+                    # Append line by line inside try/catch. A transient lock on
+                    # the log is not a reason to kill a working service, which is
+                    # exactly what a failing pipeline element would do.
+                    try { Add-Content -Path $logFile -Value $_ -Encoding utf8 -ErrorAction Stop } catch { }
+                }
             $ran = [int]((Get-Date) - $started).TotalSeconds
 
             # A process that ran a while hit a fresh problem; one that died
