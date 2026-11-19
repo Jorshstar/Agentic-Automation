@@ -117,3 +117,38 @@ describe("toCaptionWords", () => {
     expect(result[0]!.end).toBeCloseTo(0.5);
   });
 });
+
+
+describe("landscape frames", () => {
+  const landscape = { width: 1920, height: 1080, preset: "bold-yellow" as const, durationSeconds: 10 };
+
+  it("keeps captions low instead of parking them across the picture", () => {
+    const ass = buildAss({ ...landscape, words: [{ word: "x", start: 0, end: 1 }] });
+    const style = ass.split("\n").find((line) => line.startsWith("Style: Caption"))!;
+    const marginV = Number(style.split(",").at(-2));
+    // A quarter of the way up a 1080-tall frame would sit over the action.
+    expect(marginV).toBeLessThan(1080 * 0.15);
+    expect(marginV).toBeGreaterThan(0);
+  });
+
+  it("boosts text on a short frame so it is not undersized", () => {
+    const sizeOf = (ass: string): number =>
+      Number(ass.split("\n").find((l) => l.startsWith("Style: Caption"))!.split(",")[2]);
+    const word = [{ word: "x", start: 0, end: 1 }];
+    const wide = sizeOf(buildAss({ ...landscape, words: word }));
+    const square = sizeOf(
+      buildAss({ width: 1080, height: 1080, preset: "bold-yellow", durationSeconds: 10, words: word }),
+    );
+    // Same height, but the landscape frame is wider, so its text is boosted.
+    expect(wide).toBeGreaterThan(1080 / 17);
+    expect(wide).toBe(square); // both are landscape-or-square at this height
+    // And it stays a sane fraction of the frame.
+    expect(wide).toBeLessThan(1080 * 0.12);
+  });
+
+  it("still declares the real frame size so nothing is stretched", () => {
+    const ass = buildAss({ ...landscape, words: [] });
+    expect(ass).toContain("PlayResX: 1920");
+    expect(ass).toContain("PlayResY: 1080");
+  });
+});

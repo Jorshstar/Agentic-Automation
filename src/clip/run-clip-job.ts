@@ -242,7 +242,11 @@ export async function runClipJob(
       return undefined;
     }
 
-    const qa = await checkClip(outPath, result.durationSeconds);
+    const qa = await checkClip(outPath, {
+      seconds: result.durationSeconds,
+      width: result.width,
+      height: result.height,
+    });
     if (!qa.ok) {
       log(`   ⚠️ Clip ${index + 1} rejected: ${describeIssues(qa.issues)}`);
       return undefined;
@@ -434,6 +438,8 @@ function formatTimestamp(seconds: number): string {
 /** Plain-words description of a layout, so the choice is visible in the log. */
 function describeLayout(mode: ReframeMode): string {
   switch (mode) {
+    case "native":
+      return "original size, exactly as the source";
     case "smart":
       return "full screen, tracking the speaker (sides cropped)";
     case "wide":
@@ -441,8 +447,9 @@ function describeLayout(mode: ReframeMode): string {
     case "fit-top":
       return "whole frame kept, parked high";
     case "fit":
+      return "whole frame on a vertical canvas (blurred bars above and below)";
     default:
-      return "whole frame kept (blurred bars above and below)";
+      return mode;
   }
 }
 

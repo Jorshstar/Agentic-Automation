@@ -1,10 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { runFfmpeg, probeJson } from "../lib/media.js";
+import { runFfmpeg } from "../lib/media.js";
 import type { TranscriptWord } from "./transcribe.js";
 import { buildAss, toCaptionWords } from "./captions.js";
 import type { CaptionPresetName, CaptionWord } from "./captions.js";
-import { cropWidthFor, cropXExpression, FIT_PLAN, WIDE_CROP_ASPECT } from "./reframe.js";
+import { cropWidthFor, cropXExpression, NATIVE_PLAN, WIDE_CROP_ASPECT } from "./reframe.js";
+import { probeJson } from "../lib/media.js";
 import type { ReframePlan } from "./reframe.js";
 import { planTighten, remapWords, selectExpression } from "./tighten.js";
 import type { TightenPlan } from "./tighten.js";
@@ -25,6 +26,7 @@ import type { TightenPlan } from "./tighten.js";
  * volumes, which is the most common "amateur" tell in a feed.
  */
 
+/** The vertical canvas, used only by the layouts that convert to 9:16. */
 const WIDTH = 1080;
 const HEIGHT = 1920;
 /** Where the video sits in the "fit-top" layout, as a fraction of frame height. */
@@ -73,13 +75,23 @@ export interface RenderResult {
   readonly durationSeconds: number;
   /** What was applied, for logs. */
   readonly note: string;
+  /** Actual output geometry, so QA can check against what was intended. */
+  readonly width: number;
+  readonly height: number;
 }
 
 export async function renderClip(input: RenderClipInput): Promise<RenderResult> {
   await mkdir(dirname(input.outPath), { recursive: true });
   const sourceDuration = Math.max(1, input.endSecond - input.startSecond);
-  const reframe = input.reframe ?? FIT_PLAN;
+  const reframe = input.reframe ?? NATIVE_PLAN;
   const preset = input.captionPreset ?? "bold-yellow";
+
+  // Output geometry. "native" keeps the source's own size, so the clip is
+  // indistinguishable from the original; every other layout targets the
+  // vertical canvas.
+  const source = await probeDimensions(input.sourcePath);
+  const outputWidth = reframe.kind === "native" ? (source?.width ?? WIDTH) : WIDTH;
+  const outputHeight = reframe.kind === "native" ? (source?.height ?? HEIGHT) : HEIGHT;
 
   // Words on the clip's own timeline.
   const localWords = toCaptionWords(input.words, input.startSecond, input.endSecond);
@@ -103,8 +115,8 @@ export async function renderClip(input: RenderClipInput): Promise<RenderResult> 
     input.assPath,
     buildAss({
       words: captionWords,
-      width: WIDTH,
-      height: HEIGHT,
+      width: outputWidth,
+      height: outputHeight,
       preset,
       hook: input.hook,
       durationSeconds: finalDuration,
@@ -144,7 +156,8 @@ export async function renderClip(input: RenderClipInput): Promise<RenderResult> 
     "-map", "[v]",
     "-map", "[a]",
     "-c:v", "libx264", "-preset", "fast", "-crf", CRF, "-pix_fmt", "yuv420p",
-    "-r", "30",
+    // No forced frame rate: pinning 30fps re-times a 25 or 60fps source, which
+    // is a change to the original nobody asked for.
     "-threads", "2",
     "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
     "-movflags", "+faststart",
@@ -155,7 +168,14 @@ export async function renderClip(input: RenderClipInput): Promise<RenderResult> 
     .filter((note): note is string => Boolean(note))
     .join(" · ");
 
-  return { ok: result.ok, stderr: result.stderr, durationSeconds: finalDuration, note: notes };
+  return {
+    ok: result.ok,
+    stderr: result.stderr,
+    durationSeconds: finalDuration,
+    note: notes,
+    width: outputWidth,
+    height: outputHeight,
+  };
 }
 
 /* ----------------------------- filter graph ----------------------------- */
@@ -206,6 +226,15 @@ function buildFilterGraph(input: FilterInput): string {
 }
 
 /** Whether the file has an audio stream at all. Unprobeable files are assumed silent. */
+async function probeDimensions(path: string): Promise<{ width: number; height: number } | undefined> {
+  const json = (await probeJson(path)) as
+    | { streams?: { codec_type?: string; width?: number; height?: number }[] }
+    | undefined;
+  const video = json?.streams?.find((stream) => stream.codec_type === "video");
+  if (!video?.width || !video?.height) return undefined;
+  return { width: video.width, height: video.height };
+}
+
 async function hasAudioStream(path: string): Promise<boolean> {
   const json = (await probeJson(path)) as { streams?: { codec_type?: string }[] } | undefined;
   if (!json?.streams) return false;
@@ -213,6 +242,11 @@ async function hasAudioStream(path: string): Promise<boolean> {
 }
 
 function reframeChain(plan: ReframePlan): string[] {
+  // NATIVE: no scale, no crop, no pad, no overlay. setsar normalises a
+  // non-square pixel aspect so burned captions are not stretched; the picture
+  // itself passes through untouched.
+  if (plan.kind === "native") return ["[0:v]setsar=1[reframed]"];
+
   // The resampler flag belongs to `scale`; this chain ENDS in `crop`, so it
   // cannot be appended by the caller — crop has no `flags` option and ffmpeg
   // rejects the whole graph.

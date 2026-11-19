@@ -108,10 +108,19 @@ export interface BuildAssInput {
   readonly durationSeconds: number;
 }
 
-/** Fraction of frame height kept clear at the bottom for platform UI. */
-const BOTTOM_SAFE_FRACTION = 0.24;
+/**
+ * Fraction of frame height kept clear at the bottom.
+ *
+ * On a VERTICAL clip this has to clear the platform UI, which occupies roughly
+ * the bottom fifth on TikTok and Reels. On a LANDSCAPE clip there is no such
+ * overlay, and lifting the text a quarter of the way up the frame would park it
+ * across the middle of the picture, so it sits much lower.
+ */
+const BOTTOM_SAFE_VERTICAL = 0.24;
+const BOTTOM_SAFE_LANDSCAPE = 0.1;
 /** Fraction kept clear at the top (platform header / our hook card). */
-const TOP_SAFE_FRACTION = 0.13;
+const TOP_SAFE_VERTICAL = 0.13;
+const TOP_SAFE_LANDSCAPE = 0.07;
 /** How long the hook card stays on screen. */
 const HOOK_SECONDS = 2.4;
 /** A pause longer than this ends a caption line even if it is short. */
@@ -121,11 +130,21 @@ const POP_MS = 90;
 
 export function buildAss(input: BuildAssInput): string {
   const preset = PRESETS[input.preset] ?? PRESETS["bold-yellow"];
-  const fontSize = Math.round(input.height / preset.sizeDivisor);
+  // Text is sized against frame HEIGHT so it scales with the picture. A
+  // landscape frame is short, so the same divisor leaves the text looking
+  // undersized next to a much wider picture — hence the boost.
+  const LANDSCAPE_TEXT_BOOST = 1.25;
+  const divisor =
+    input.width >= input.height ? preset.sizeDivisor / LANDSCAPE_TEXT_BOOST : preset.sizeDivisor;
+  const fontSize = Math.round(input.height / divisor);
   const hookSize = Math.round(fontSize * 0.82);
   const marginH = Math.round(input.width * 0.07);
-  const marginBottom = Math.round(input.height * BOTTOM_SAFE_FRACTION);
-  const marginTop = Math.round(input.height * TOP_SAFE_FRACTION);
+  // Landscape and vertical need different safe areas; see the constants above.
+  const landscape = input.width >= input.height;
+  const marginBottom = Math.round(
+    input.height * (landscape ? BOTTOM_SAFE_LANDSCAPE : BOTTOM_SAFE_VERTICAL),
+  );
+  const marginTop = Math.round(input.height * (landscape ? TOP_SAFE_LANDSCAPE : TOP_SAFE_VERTICAL));
 
   const header = [
     "[Script Info]",

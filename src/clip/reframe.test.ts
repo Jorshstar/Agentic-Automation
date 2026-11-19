@@ -96,15 +96,11 @@ describe("smooth", () => {
 });
 
 describe("defaultModeForTheme", () => {
-  it("keeps the whole frame for wide action, where a crop loses the pitch", () => {
-    expect(defaultModeForTheme(planForTheme("the goals"))).toBe("fit-top");
-  });
-
-  it("fills the screen by default for talking content, like short-form does", () => {
-    // Showing a whole 16:9 frame inside 9:16 leaves it at 31.6% of the height,
-    // which reads as a thin strip between blurred bars.
-    for (const theme of ["emotional moments", "key insights", "funny", "auto"]) {
-      expect(defaultModeForTheme(planForTheme(theme))).toBe("smart");
+  it("leaves every theme at its original size by default", () => {
+    // Converting to vertical always costs something — padding or cropping — so
+    // it is opt-in. A clip should look like the video it came from.
+    for (const theme of ["the goals", "emotional moments", "key insights", "funny", "auto"]) {
+      expect(defaultModeForTheme(planForTheme(theme))).toBe("native");
     }
   });
 
@@ -139,7 +135,7 @@ describe("parseLayoutInstruction", () => {
       "make it like tiktok",
       "zoom in on him",
       "close up please",
-      "no blur",
+      "make it vertical",
     ]) {
       expect(parseLayoutInstruction(text)).toBe("smart");
     }
@@ -175,6 +171,14 @@ describe("parseLayoutInstruction", () => {
     expect(parseLayoutInstruction("wide")).toBe("wide");
     expect(parseLayoutInstruction("fit")).toBe("fit");
     expect(parseLayoutInstruction("fit-top")).toBe("fit-top");
+  });
+
+  it("reads 'no blur' and 'no bars' as keep-it-original, not crop", () => {
+    // These ask for the padding to go away, and the way to have no padding is
+    // to not build a vertical canvas in the first place.
+    for (const text of ["no blur", "no bars", "no padding", "leave it as it was", "same size"]) {
+      expect(parseLayoutInstruction(text)).toBe("native");
+    }
   });
 
   it("returns undefined when no layout is mentioned, leaving the default", () => {

@@ -9,11 +9,16 @@ import type { ThemePlan } from "./themes.js";
 const execFileAsync = promisify(execFile);
 
 /**
- * REFRAMING — turning a 16:9 source into a 9:16 vertical clip.
+ * REFRAMING — optionally turning a 16:9 source into a 9:16 vertical clip.
  *
- * The DEFAULT keeps the original picture completely intact: the full frame is
- * placed on the vertical canvas over a blurred copy of itself. Nothing is
- * cropped, stretched or repainted, and no AI model sees a pixel of the output.
+ * The DEFAULT is "native": don't. The clip keeps the source's exact dimensions
+ * and aspect, so it looks identical to the original video, because it is the
+ * original video with a time range cut out of it.
+ *
+ * Converting to vertical is opt-in, because it cannot be done without loss: a
+ * 16:9 frame on a 9:16 canvas either fills 31.6% of the height with the rest
+ * padded, or fills the screen by cropping the sides away. Both are real changes
+ * to what the viewer sees, so the user chooses.
  *
  * Subject-tracked cropping is available but opt-in, because it fills the screen
  * by discarding the sides of the frame. When it is on, we avoid a face-detection
@@ -34,7 +39,7 @@ const execFileAsync = promisify(execFile);
  * Nothing here throws. Every failure path degrades to "fit", which always works.
  */
 
-export type ReframeKind = "crop" | "crop-wide" | "fit-top" | "fit" | "passthrough";
+export type ReframeKind = "native" | "crop" | "crop-wide" | "fit-top" | "fit" | "passthrough";
 
 export interface ReframeKeyframe {
   /** Seconds from the start of the CLIP (not the source video). */
@@ -54,7 +59,14 @@ export interface ReframePlan {
   readonly note: string;
 }
 
-export const FIT_PLAN: ReframePlan = { kind: "fit", keyframes: [], note: "blurred fit (default)" };
+export const FIT_PLAN: ReframePlan = { kind: "fit", keyframes: [], note: "blurred fit" };
+
+/**
+ * The default: hand the source back at its own size. No vertical canvas, no
+ * padding, no blur, no crop — the clip looks exactly like the video it came
+ * from, because it IS the video it came from, trimmed.
+ */
+export const NATIVE_PLAN: ReframePlan = { kind: "native", keyframes: [], note: "original size, untouched" };
 
 /** Max frames we ever send to the vision model for one clip. */
 const MAX_SAMPLES = 7;
@@ -70,7 +82,7 @@ const STATIC_DEVIATION = 0.05;
 /** Vision model: cheapest one that reliably localises a subject in a frame. */
 const VISION_MODEL = "gpt-4o-mini";
 
-export type ReframeMode = "smart" | "wide" | "fit" | "fit-top";
+export type ReframeMode = "native" | "smart" | "wide" | "fit" | "fit-top";
 
 /** Aspect of the crop window for "wide": 4:5, the tallest format that still
  * keeps a useful amount of the scene. It fills ~70% of the frame height versus
@@ -98,13 +110,17 @@ export const WIDE_CROP_ASPECT = 4 / 5;
  * sampled frames and returns a number — where the subject is. Every pixel
  * operation is plain ffmpeg.
  */
-export function defaultModeForTheme(plan: ThemePlan): ReframeMode {
+export function defaultModeForTheme(_plan: ThemePlan): ReframeMode {
   const override = parseLayoutInstruction(process.env.CLIP_REFRAME ?? "");
   if (override) return override;
-  // Wide action genuinely needs the whole frame — a 9:16 crop of a football
-  // pitch throws away the play. Everything else defaults to the full-screen
-  // tracked crop, because that is what short-form actually looks like.
-  return plan.family === "sports-action" ? "fit-top" : "smart";
+  // DEFAULT: leave the frame alone.
+  //
+  // A 16:9 source forced onto a 9:16 canvas can only ever fill 31.6% of the
+  // height, and the remaining two thirds have to be filled with something —
+  // blurred bars that look nothing like the original. Converting to vertical is
+  // therefore a choice, not a requirement, and it is the user's to make. Ask for
+  // it in words ("full screen", "vertical", "like tiktok") and you get it.
+  return "native";
 }
 
 /**
@@ -120,10 +136,23 @@ export function parseLayoutInstruction(text: string): ReframeMode | undefined {
   if (value === "") return undefined;
 
   // Exact mode names first, so a config value always wins over prose.
+  if (value === "native" || value === "original" || value === "as-is") return "native";
   if (value === "smart" || value === "crop" || value === "zoom") return "smart";
   if (value === "wide" || value === "balanced") return "wide";
   if (value === "fit" || value === "whole" || value === "full-frame") return "fit";
   if (value === "fit-top" || value === "top") return "fit-top";
+
+  // An explicit "keep it as it was" beats everything else.
+  if (
+    /\b(original|as.?is|don'?t change|do not change|same size|leave it|unchanged|no bars|no blur|no padding|don'?t convert)\b/u.test(
+      value,
+    )
+  ) {
+    return "native";
+  }
+
+  // Asking for a vertical/short-form frame is what opts IN to conversion.
+  if (/\b(vertical|portrait|9.?16|short|reel|story)\b/u.test(value)) return "smart";
 
   // "show everything" wins over "full screen": a request to keep the whole
   // picture is specific, while "full" on its own is ambiguous.
@@ -138,7 +167,7 @@ export function parseLayoutInstruction(text: string): ReframeMode | undefined {
     return "wide";
   }
   if (
-    /\b(full ?screen|fill (the )?(screen|frame)|like ?tik ?tok|tiktok style|zoom(ed)? in|close ?up|crop(ped)?( in)?|no bars|no blur|fill it)\b/u.test(
+    /\b(full ?screen|fill (the )?(screen|frame)|like ?tik ?tok|tiktok style|zoom(ed)? in|close ?up|crop(ped)?( in)?|fill it)\b/u.test(
       value,
     )
   ) {
@@ -160,6 +189,10 @@ export interface PlanReframeInput {
  * mode is not "smart" it returns immediately without spending anything.
  */
 export async function planReframe(input: PlanReframeInput): Promise<ReframePlan> {
+  // Cheapest possible path: nothing to measure, nothing to decide, nothing to
+  // spend. The frame is kept exactly as it is.
+  if (input.mode === "native") return NATIVE_PLAN;
+
   const dimensions = await probeDimensions(input.sourcePath);
   const sourceWidth = dimensions?.width;
   const sourceHeight = dimensions?.height;

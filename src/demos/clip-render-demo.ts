@@ -76,6 +76,7 @@ async function main(): Promise<void> {
   });
 
   const variants: Variant[] = [
+    { name: "native", reframe: { kind: "native", keyframes: [], note: "original" }, preset: "bold-yellow", tighten: false, captions: true },
     { name: "fit", reframe: { kind: "fit", keyframes: [], note: "fit" }, preset: "bold-yellow", tighten: false, captions: true },
     { name: "fit-top", reframe: { kind: "fit-top", keyframes: [], note: "fit-top" }, preset: "impact-red", tighten: false, captions: true },
     { name: "crop-static", reframe: crop("static", [{ second: 0, xCenter: 0.35 }]), preset: "bold-yellow", tighten: false, captions: true },
@@ -119,7 +120,11 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const qa = await checkClip(outPath, result.durationSeconds);
+    const qa = await checkClip(outPath, {
+      seconds: result.durationSeconds,
+      width: result.width,
+      height: result.height,
+    });
     if (!qa.ok) failures++;
     console.log(
       `${qa.ok ? "✅" : "❌"} ${variant.name.padEnd(16)} ${qa.width}x${qa.height} ` +

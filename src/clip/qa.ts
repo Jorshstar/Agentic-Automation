@@ -38,10 +38,20 @@ export interface QaResult {
 const MIN_BYTES = 40_000;
 /** A clip shorter than this cannot carry a thought, whatever the theme. */
 const MIN_SECONDS = 4;
-const EXPECTED_WIDTH = 1080;
-const EXPECTED_HEIGHT = 1920;
 
-export async function checkClip(path: string, expectedSeconds?: number): Promise<QaResult> {
+/**
+ * Expected output geometry. There is no single right answer any more: a clip
+ * left at its native size is 1920x1080, a vertical one is 1080x1920. The caller
+ * passes what it asked the renderer for, and we check we got it.
+ */
+export interface QaExpectation {
+  readonly seconds?: number;
+  readonly width?: number;
+  readonly height?: number;
+}
+
+export async function checkClip(path: string, expected: QaExpectation = {}): Promise<QaResult> {
+  const expectedSeconds = expected.seconds;
   const issues: QaIssue[] = [];
 
   let bytes: number;
@@ -71,10 +81,14 @@ export async function checkClip(path: string, expectedSeconds?: number): Promise
 
   if (!video) {
     issues.push({ code: "no-video", detail: "no video stream" });
-  } else if (video.width !== EXPECTED_WIDTH || video.height !== EXPECTED_HEIGHT) {
+  } else if (
+    expected.width !== undefined &&
+    expected.height !== undefined &&
+    (video.width !== expected.width || video.height !== expected.height)
+  ) {
     issues.push({
       code: "wrong-size",
-      detail: `${video.width}x${video.height}, expected ${EXPECTED_WIDTH}x${EXPECTED_HEIGHT}`,
+      detail: `${video.width}x${video.height}, expected ${expected.width}x${expected.height}`,
     });
   }
 
