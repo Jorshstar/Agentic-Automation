@@ -131,6 +131,31 @@ describe("selectFromSignals — the goals case", () => {
     expect(moments[0]!.endSecond).toBeLessThanOrEqual(12);
   });
 
+  it("never returns overlapping clips from the no-signal fallback", () => {
+    // A 56s TikTok produced [11-33] and [23-45] - ten seconds of the same
+    // content delivered twice.
+    for (const seconds of [56, 90, 120, 300, 900]) {
+      const moments = selectFromSignals(
+        input({ durationSeconds: seconds, count: 4, audio: audio([]), plan: planForTheme("funny") }),
+      );
+      for (let i = 1; i < moments.length; i++) {
+        expect(moments[i]!.startSecond).toBeGreaterThanOrEqual(moments[i - 1]!.endSecond);
+      }
+      for (const moment of moments) {
+        expect(moment.endSecond).toBeLessThanOrEqual(seconds);
+        expect(moment.endSecond).toBeGreaterThan(moment.startSecond);
+      }
+    }
+  });
+
+  it("treats a short source as one clip rather than slicing near-duplicates", () => {
+    const moments = selectFromSignals(
+      input({ durationSeconds: 56, count: 3, audio: audio([]), plan: planForTheme("funny") }),
+    );
+    expect(moments).toHaveLength(1);
+    expect(moments[0]!.startSecond).toBe(0);
+  });
+
   it("names the moment from commentary when there is any", () => {
     const moments = selectFromSignals(
       input({

@@ -198,35 +198,56 @@ function preferSurges(events: readonly AudioEvent[]): AudioEvent[] {
 }
 
 /**
- * Last resort: no audio events at all (a flat, quiet source). Space clips evenly
- * so the user still gets something to react to instead of an empty result.
+ * Last resort: no audio events at all, and nothing the model wanted. Rather than
+ * return an empty list — which is what the old pipeline did, and what the user
+ * experiences as the bot ignoring them — hand back something to react to, with
+ * an honest low score and evidence saying there was nothing to go on.
+ *
+ * Two rules, both learned from a 56-second TikTok that came back as two clips
+ * overlapping by ten seconds:
+ *
+ *   1. Clips must NOT overlap. This path used to divide the usable range by the
+ *      clip count without accounting for clip LENGTH, so on a short source the
+ *      windows ran straight through each other and the viewer got the same
+ *      moment twice.
+ *   2. A short source is ONE clip. If the whole video is barely longer than a
+ *      single clip, slicing it into pieces produces near-duplicates of the same
+ *      thing; the video itself is the clip.
  */
 function evenlySpacedFallback(input: SelectInput): readonly ClipMoment[] {
   const { plan } = input;
-  const length = plan.duration.ideal;
-  const usable = input.durationSeconds - length;
-  if (usable <= 0) {
+  const length = Math.min(plan.duration.ideal, input.durationSeconds);
+  const evidence = ["no audio events detected"];
+
+  // Not enough room for two clips with any separation: return the whole thing.
+  if (input.durationSeconds < length * 3) {
     return [
       {
         startSecond: 0,
         endSecond: Math.min(input.durationSeconds, plan.duration.max),
         hook: defaultHook(plan.theme),
-        reason: "source shorter than one clip",
-        score: 50,
-        evidence: ["no audio events detected"],
+        reason: "short source — the whole video is the clip",
+        score: 45,
+        evidence,
       },
     ];
   }
-  const count = Math.min(input.count, 4);
+
+  // How many non-overlapping clips of this length actually fit, leaving a gap
+  // between each so they are distinct moments rather than a continuous cut.
+  const fits = Math.floor(input.durationSeconds / length);
+  const count = Math.max(1, Math.min(input.count, fits - 1, 4));
+  const gap = (input.durationSeconds - count * length) / (count + 1);
+
   return Array.from({ length: count }, (_, i) => {
-    const start = Math.round((usable * (i + 1)) / (count + 1));
+    const start = round1(gap * (i + 1) + length * i);
     return {
       startSecond: start,
-      endSecond: start + length,
+      endSecond: round1(Math.min(start + length, input.durationSeconds)),
       hook: defaultHook(plan.theme),
       reason: "evenly spaced (no usable signal)",
       score: 40,
-      evidence: ["no audio events detected"],
+      evidence,
     };
   });
 }
