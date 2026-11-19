@@ -1,42 +1,18 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, writeFile, chmod, access } from "node:fs/promises";
+import { mkdir, writeFile, chmod, access, readdir, readFile } from "node:fs/promises";
+import { probeDurationSeconds } from "../lib/media.js";
+import type { TranscriptSegment } from "./transcribe.js";
 import { join } from "node:path";
+import { resolveYtDlp } from "../lib/binaries.js";
 
 const execFileAsync = promisify(execFile);
 
 /**
- * Debian's apt yt-dlp is often months stale, and YouTube breaks old versions
- * (HTTP 400 on the API page). So on Linux (the cloud) we fetch the latest
- * standalone yt-dlp binary at runtime and use THAT. Locally (Windows/mac) we use
- * whatever yt-dlp is on PATH. Override with YT_DLP_PATH if needed.
+ * yt-dlp resolution (download-the-latest-standalone, cache it) lives in
+ * lib/binaries.ts now, so Windows gets the same self-healing behaviour Linux
+ * already had. Override with YT_DLP_PATH.
  */
-const YT_DLP_LATEST = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux";
-const YT_DLP_CACHE = "/tmp/yt-dlp";
-let cachedYtDlp: string | undefined;
-
-async function ensureYtDlp(): Promise<string> {
-  if (process.env.YT_DLP_PATH) return process.env.YT_DLP_PATH;
-  if (process.platform !== "linux") return "yt-dlp";
-  if (cachedYtDlp) return cachedYtDlp;
-  try {
-    await access(YT_DLP_CACHE);
-    cachedYtDlp = YT_DLP_CACHE;
-    return cachedYtDlp;
-  } catch {
-    // not cached yet — download it
-  }
-  try {
-    const res = await fetch(YT_DLP_LATEST, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
-    if (!res.ok) throw new Error(`fetch yt-dlp failed (${res.status})`);
-    await writeFile(YT_DLP_CACHE, new Uint8Array(await res.arrayBuffer()));
-    await chmod(YT_DLP_CACHE, 0o755);
-    cachedYtDlp = YT_DLP_CACHE;
-    return cachedYtDlp;
-  } catch {
-    return "yt-dlp"; // fall back to the apt build if the download fails
-  }
-}
 
 /**
  * Client selection. The worker runs on a RESIDENTIAL IP, where yt-dlp's default
@@ -87,7 +63,7 @@ function normalizeCookies(raw: string): string {
 
 /** Run yt-dlp; on failure throw an error carrying the REAL reason (its stderr). */
 async function runYtdlp(args: readonly string[], timeoutMs: number): Promise<string> {
-  const bin = await ensureYtDlp();
+  const bin = await resolveYtDlp();
   try {
     const { stdout } = await execFileAsync(bin, args, { maxBuffer: 1024 * 1024 * 64, timeout: timeoutMs });
     return stdout;
@@ -196,4 +172,177 @@ export async function downloadSource(url: string, dir: string): Promise<Download
     durationSeconds: typeof info.duration === "number" ? info.duration : 0,
     chapters,
   };
+}
+
+/* ======================================================================== */
+/*  SOURCE RESOLUTION — a job may start from a link OR from a file already   */
+/*  on disk (a Telegram upload, a local render, a manual drop).              */
+/* ======================================================================== */
+
+/**
+ * Distinguish a URL from a filesystem path. Anything with a scheme we treat as
+ * a link for yt-dlp; everything else is a local file. Deliberately simple —
+ * yt-dlp itself is the authority on which links it can handle.
+ */
+export function isRemoteUrl(input: string): boolean {
+  return /^(https?|ftp|rtmp|rtsp):\/\//iu.test(input.trim());
+}
+
+/**
+ * Load a video that is already on disk. No download, no network, no cost — the
+ * path a Telegram upload or a local file takes. Title falls back to the file
+ * name, which is usually what the user recognises anyway.
+ */
+export async function loadLocalSource(path: string): Promise<DownloadedSource> {
+  await access(path); // throws a clear ENOENT if the caller passed a bad path
+  const durationSeconds = (await probeDurationSeconds(path)) ?? 0;
+  if (durationSeconds <= 0) {
+    throw new Error(`Could not read "${path}" as a video — is it a valid media file?`);
+  }
+  const title = (path.split(/[\\/]/u).pop() ?? "uploaded video").replace(/\.[^.]+$/u, "");
+  return { videoPath: path, title: title.slice(0, 200), description: "", durationSeconds, chapters: [] };
+}
+
+/**
+ * The single entry point for getting a source video, whatever the user gave us.
+ */
+export async function resolveSource(input: string, dir: string): Promise<DownloadedSource> {
+  const trimmed = input.trim();
+  if (isRemoteUrl(trimmed)) return downloadSource(trimmed, dir);
+  return loadLocalSource(trimmed);
+}
+
+/* ======================================================================== */
+/*  FREE TRANSCRIPT — YouTube's own auto-captions.                          */
+/* ======================================================================== */
+
+/**
+ * Fetch the platform's auto-generated captions without downloading the video.
+ *
+ * Why: transcribing a two-hour podcast with Whisper costs real money, and we
+ * only need caption-grade accuracy for the ~2 minutes that actually become
+ * clips. Auto-captions are free, instant, and more than good enough to CHOOSE
+ * moments from. The pipeline uses them for selection and then spends Whisper
+ * only on the chosen windows — roughly a 90% cut on a long source.
+ *
+ * Returns undefined whenever captions are unavailable (most non-YouTube hosts,
+ * or a video with them disabled), and the caller falls back to transcribing.
+ */
+export async function fetchAutoCaptions(url: string, dir: string): Promise<TranscriptSegment[] | undefined> {
+  try {
+    await mkdir(dir, { recursive: true });
+    const cookies = await cookieArgs(dir);
+    const output = join(dir, "subs");
+    await runYtdlp(
+      [
+        "--skip-download",
+        "--write-auto-subs",
+        "--write-subs",
+        "--sub-langs", "en.*,en",
+        "--sub-format", "vtt",
+        "--no-playlist",
+        "--no-warnings",
+        "--user-agent", MODERN_UA,
+        ...clientArgs(cookies.length > 0),
+        ...cookies,
+        "-o", output,
+        url,
+      ],
+      5 * 60_000,
+    );
+
+    const files = (await readdir(dir)).filter((name) => name.endsWith(".vtt"));
+    if (files.length === 0) return undefined;
+    const vtt = await readFile(join(dir, files[0]!), "utf8");
+    const segments = parseVtt(vtt);
+    return segments.length > 0 ? segments : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Parse WebVTT into plain timed segments.
+ *
+ * YouTube's auto-caption VTT is awkward in two specific ways that a naive parser
+ * gets wrong, and both are handled here:
+ *
+ *   1. Inline karaoke markup — `<00:00:04.120><c>word</c>` — appears inside the
+ *      cue text and has to be stripped or it ends up in the prompt.
+ *   2. Cues ROLL: the caption box holds two lines and scrolls, so a line shows
+ *      up as the BOTTOM line of one cue and again as the TOP line of the next.
+ *      Comparing whole cues is not enough — the repeat is a partial overlap at
+ *      either end. We merge on word overlap instead: the leading words of a new
+ *      cue that we have just emitted are dropped, and a cue that repeats
+ *      entirely is skipped. Without this the transcript reads every line two or
+ *      three times, which wastes prompt budget and confuses the selector.
+ */
+export function parseVtt(vtt: string): TranscriptSegment[] {
+  const segments: TranscriptSegment[] = [];
+  const blocks = vtt.replace(/\r/gu, "").split(/\n\n+/u);
+  /** A rolling window of the words already emitted, for overlap detection. */
+  let emitted: string[] = [];
+
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    const timingLine = lines.find((line) => line.includes("-->"));
+    if (!timingLine) continue;
+
+    const match = timingLine.match(
+      /(\d{1,2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[.,]\d{3})/u,
+    );
+    if (!match) continue;
+
+    const start = vttTimeToSeconds(match[1]!);
+    const end = vttTimeToSeconds(match[2]!);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+
+    const text = lines
+      .slice(lines.indexOf(timingLine) + 1)
+      .join(" ")
+      .replace(/<[^>]*>/gu, "") // strip <c> spans and inline timestamps
+      .replace(/&nbsp;/gu, " ")
+      .replace(/&amp;/gu, "&")
+      .replace(/&#39;/gu, "'")
+      .replace(/&quot;/gu, '"')
+      .replace(/\s+/gu, " ")
+      .trim();
+    if (text === "") continue;
+
+    // Drop the words at the head of this cue that we have already emitted.
+    const words = text.split(" ").filter((word) => word !== "");
+    const overlap = overlapWords(emitted, words);
+    const fresh = words.slice(overlap);
+    if (fresh.length === 0) continue; // the cue was entirely a repeat
+
+    segments.push({ start, end, text: fresh.join(" ") });
+    // Keep the window short: an overlap never spans more than a caption box.
+    emitted = [...emitted, ...fresh].slice(-40);
+  }
+  return segments;
+}
+
+/**
+ * How many words at the START of `next` already appear at the END of `emitted`.
+ * Matching on whole words rather than characters keeps a partial match from
+ * slicing a word in half.
+ */
+function overlapWords(emitted: readonly string[], next: readonly string[]): number {
+  const max = Math.min(emitted.length, next.length);
+  for (let size = max; size > 0; size--) {
+    let same = true;
+    for (let i = 0; i < size; i++) {
+      if (emitted[emitted.length - size + i] !== next[i]) {
+        same = false;
+        break;
+      }
+    }
+    if (same) return size;
+  }
+  return 0;
+}
+
+function vttTimeToSeconds(value: string): number {
+  const [hours, minutes, rest] = value.replace(",", ".").split(":");
+  return Number(hours) * 3600 + Number(minutes) * 60 + Number(rest);
 }

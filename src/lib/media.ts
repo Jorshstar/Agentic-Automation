@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { resolveMediaTool } from "./binaries.js";
 
 /**
  * Small media utilities — thin, read-only wrappers around ffprobe.
@@ -19,7 +20,7 @@ const execFileAsync = promisify(execFile);
  */
 export async function probeDurationSeconds(filePath: string): Promise<number | undefined> {
   try {
-    const { stdout } = await execFileAsync("ffprobe", [
+    const { stdout } = await execFileAsync(await resolveMediaTool("ffprobe"), [
       "-v",
       "error",
       "-show_entries",
@@ -42,7 +43,7 @@ export async function probeDurationSeconds(filePath: string): Promise<number | u
  */
 export async function probeJson(filePath: string): Promise<unknown | undefined> {
   try {
-    const { stdout } = await execFileAsync("ffprobe", [
+    const { stdout } = await execFileAsync(await resolveMediaTool("ffprobe"), [
       "-v",
       "error",
       "-print_format",
@@ -60,7 +61,7 @@ export async function probeJson(filePath: string): Promise<unknown | undefined> 
 /** Whether ffprobe is available on PATH. */
 export async function isFfprobeAvailable(): Promise<boolean> {
   try {
-    await execFileAsync("ffprobe", ["-version"]);
+    await execFileAsync(await resolveMediaTool("ffprobe"), ["-version"]);
     return true;
   } catch {
     return false;
@@ -82,7 +83,7 @@ export interface FfmpegResult {
 export async function runFfmpeg(args: readonly string[]): Promise<FfmpegResult> {
   try {
     const { stderr } = await execFileAsync(
-      "ffmpeg",
+      await resolveMediaTool("ffmpeg"),
       ["-hide_banner", "-loglevel", "error", ...args],
       { maxBuffer: 1024 * 1024 * 64 },
     );

@@ -40,7 +40,12 @@ describe("FileTopicHistoryStore", () => {
   });
 
   it("never throws on a missing/corrupt file (best-effort memory)", async () => {
-    const store = new FileTopicHistoryStore("Z:/definitely/not/a/real/path/topics.json");
+    // Nested UNDER an existing file, so creating the directory fails with
+    // ENOTDIR on every platform. The previous value was "Z:/..." — an unmapped
+    // drive on Windows, but on Linux/WSL just a RELATIVE directory, which the
+    // store happily created inside the repo. That made the test pass once and
+    // fail on every run after it.
+    const store = new FileTopicHistoryStore("package.json/nope/topics.json");
     expect(await store.recent(5)).toEqual([]);
     await expect(
       store.add({ title: "X", niche: "scary-stories", date: "2026-07-01" }),

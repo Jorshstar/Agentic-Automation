@@ -56,11 +56,20 @@ async function main(): Promise<void> {
           void telegram.send(message);
         },
       });
-      await telegram.send(
-        result.delivered > 0
-          ? `✅ Sent ${result.delivered} clip(s) from "${result.title.slice(0, 70)}". Want more or a different angle?`
-          : `❌ Couldn't produce clips from that one.`,
-      );
+      if (result.delivered > 0) {
+        // Show the scores so the user can tell a near-certain pick from a
+        // marginal one without opening every clip.
+        const scores = result.clips
+          .filter((clip) => clip.delivered)
+          .map((clip) => `${clip.score}`)
+          .join(", ");
+        await telegram.send(
+          `✅ Sent ${result.delivered} clip(s) from "${result.title.slice(0, 70)}" ` +
+            `(scores: ${scores}/100). Want more, or a different angle?`,
+        );
+      } else {
+        await telegram.send("❌ Couldn't produce clips from that one.");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 400) : String(error);
       console.error("clip job failed:", message);

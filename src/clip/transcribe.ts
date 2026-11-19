@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { resolveMediaTool } from "../lib/binaries.js";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -38,7 +39,7 @@ const CHUNK_SECONDS = 900; // 15 min — comfortably under whisper's 25 MB/file 
 async function extractAudioChunks(videoPath: string, dir: string): Promise<string[]> {
   await mkdir(dir, { recursive: true });
   await execFileAsync(
-    "ffmpeg",
+    await resolveMediaTool("ffmpeg"),
     [
       "-hide_banner", "-loglevel", "error", "-y",
       "-i", videoPath,
@@ -111,3 +112,94 @@ export async function transcribe(videoPath: string, dir: string): Promise<Transc
     minutes: chunks.length > 0 ? (words.at(-1)?.end ?? segments.at(-1)?.end ?? 0) / 60 : 0,
   };
 }
+
+/* ======================================================================== */
+/*  WINDOWED TRANSCRIPTION                                                  */
+/* ======================================================================== */
+
+/** A span of the source video to transcribe, in seconds. */
+export interface TranscribeWindow {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Transcribe ONLY the given windows, returning word timings on the SOURCE
+ * timeline.
+ *
+ * This is the cost lever for long sources. Selecting moments needs a rough
+ * transcript of the whole video (auto-captions give us that free), but burning
+ * karaoke captions needs exact word timings for the ~2 minutes that actually
+ * ship. Transcribing a 2-hour podcast end to end to use 2 minutes of it is pure
+ * waste; this transcribes the 2 minutes.
+ *
+ * Windows are padded slightly so a word straddling an edge is not cut in half,
+ * and each window's timings are offset back onto the full timeline so callers
+ * cannot tell the difference from a full transcript.
+ */
+export async function transcribeWindows(
+  videoPath: string,
+  windows: readonly TranscribeWindow[],
+  dir: string,
+): Promise<Transcript> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
+  await mkdir(dir, { recursive: true });
+
+  const words: TranscriptWord[] = [];
+  const segments: TranscriptSegment[] = [];
+  const textParts: string[] = [];
+  let seconds = 0;
+
+  for (const [index, window] of windows.entries()) {
+    // A little padding on each side: a word can straddle the boundary, and the
+    // renderer discards anything outside the clip anyway.
+    const start = Math.max(0, window.start - WINDOW_PAD_SECONDS);
+    const duration = Math.max(1, window.end + WINDOW_PAD_SECONDS - start);
+    const chunkPath = join(dir, `window-${index}.mp3`);
+
+    try {
+      await execFileAsync(
+        await resolveMediaTool("ffmpeg"),
+        [
+          "-hide_banner", "-loglevel", "error", "-y",
+          "-ss", String(start),
+          "-i", videoPath,
+          "-t", String(duration),
+          "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "48k",
+          chunkPath,
+        ],
+        { maxBuffer: 1024 * 1024 * 64, timeout: 5 * 60_000 },
+      );
+    } catch {
+      continue; // a window we cannot extract simply contributes no words
+    }
+
+    const result = await transcribeChunk(apiKey, chunkPath);
+    seconds += duration;
+
+    for (const word of result.words ?? []) {
+      if (typeof word.start === "number" && typeof word.end === "number" && word.word) {
+        words.push({ word: word.word, start: word.start + start, end: word.end + start });
+      }
+    }
+    for (const segment of result.segments ?? []) {
+      if (typeof segment.start === "number" && typeof segment.end === "number" && segment.text) {
+        segments.push({
+          start: segment.start + start,
+          end: segment.end + start,
+          text: segment.text.trim(),
+        });
+      }
+    }
+    if (result.text) textParts.push(result.text.trim());
+  }
+
+  words.sort((a, b) => a.start - b.start);
+  segments.sort((a, b) => a.start - b.start);
+
+  return { words, segments, text: textParts.join(" "), minutes: seconds / 60 };
+}
+
+/** Padding applied either side of a window so edge words survive. */
+const WINDOW_PAD_SECONDS = 1.5;

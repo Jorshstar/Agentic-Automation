@@ -1,14 +1,33 @@
 import type { AIKernel } from "../ai/index.js";
 import { createClaudeAIKernel } from "../ai/index.js";
 import type { TranscriptSegment } from "./transcribe.js";
-import type { EnergyPeak } from "./audio-energy.js";
+import type { AudioAnalysis, AudioEvent, EnergyPeak } from "./audio-energy.js";
+import { eventStrength } from "./audio-energy.js";
+import type { SceneCut } from "./scene-detect.js";
+import { cutsInWindow, snapToCut } from "./scene-detect.js";
 import type { SourceChapter } from "./source-download.js";
+import type { ClipMode, ThemePlan } from "./themes.js";
 
 /**
- * Picks the best clip-worthy moments from a transcript, steered by a THEME
- * ("goals", "funniest bits", "key insights", or "auto"). Uses the loudness peaks
- * and chapters as hints. Returns raw time ranges; the caller snaps them to word
- * boundaries.
+ * MOMENT SELECTION — deciding WHICH parts of a long video become clips.
+ *
+ * Two different strategies, picked by the theme plan and by whether the source
+ * actually contains speech:
+ *
+ *   SPEECH MODE  The transcript carries the meaning, so a language model reads
+ *                it and picks moments. Audio and scene data go in as hints, and
+ *                afterwards every pick is re-scored against that evidence — a
+ *                pick that lands on a real crowd surge is more likely to be the
+ *                moment the user asked for than one that does not.
+ *
+ *   ACTION MODE  There is nothing useful to read: a music-only highlight reel,
+ *                a gameplay clip, a match with sparse commentary. The old
+ *                pipeline returned ZERO clips here, which is the single biggest
+ *                reason "clip the goals" used to fail. Instead we find moments
+ *                from the signal itself — a sustained crowd surge followed by a
+ *                burst of replay cuts is a goal, and detecting it costs nothing.
+ *
+ * Both paths return the same scored, de-overlapped, chronological list.
  */
 
 export interface ClipMoment {
@@ -16,100 +35,364 @@ export interface ClipMoment {
   readonly endSecond: number;
   /** A punchy title/hook for the clip. */
   readonly hook: string;
-  /** Why this moment was chosen (for logs). */
+  /** Why this moment was chosen (for logs and the delivery caption). */
   readonly reason: string;
+  /** 0-100 confidence that this is a strong clip for the requested theme. */
+  readonly score: number;
+  /** Concrete signals backing the pick, e.g. "crowd surge +14dB". */
+  readonly evidence: readonly string[];
 }
 
 const SYSTEM_PROMPT_ID = "clip-select.system";
 const USER_PROMPT_ID = "clip-select.user";
 
 export interface SelectInput {
-  readonly theme: string;
+  readonly plan: ThemePlan;
+  /** Effective mode — may differ from plan.mode when the source has no speech. */
+  readonly mode: ClipMode;
   readonly count: number;
   readonly title: string;
   readonly description: string;
   readonly durationSeconds: number;
   readonly segments: readonly TranscriptSegment[];
-  readonly peaks: readonly EnergyPeak[];
+  readonly audio: AudioAnalysis;
+  readonly sceneCuts: readonly SceneCut[];
   readonly chapters: readonly SourceChapter[];
+  /** Surfaces a degraded path (e.g. the selector model failed) to the caller. */
+  readonly onWarn?: (message: string) => void;
 }
 
-export class ClaudeMomentSelectionProvider {
+export class ClipMomentSelector {
   private readonly kernel: AIKernel;
+
   constructor(kernel?: AIKernel) {
     this.kernel = kernel ?? createClaudeAIKernel();
   }
 
   async select(input: SelectInput): Promise<readonly ClipMoment[]> {
-    // Timestamps in PLAIN SECONDS (integers). Feeding m:ss made the model
-    // miscompute and hallucinate out-of-range seconds; echoing seconds is exact.
+    if (input.mode === "action") {
+      return selectFromSignals(input);
+    }
+
+    let picks: readonly ClipMoment[] = [];
+    try {
+      picks = await this.selectFromTranscript(input);
+    } catch (error) {
+      // A selector failure must NOT end the job. By this point the source has
+      // been downloaded and analysed — the expensive part is already paid for —
+      // and the loudness and scene signals are still sitting right there. An
+      // exhausted API balance or a provider outage should cost quality, not the
+      // whole run.
+      input.onWarn?.(
+        `⚠️ Moment selection failed (${short(error)}). Falling back to audio detection.`,
+      );
+      return selectFromSignals(input);
+    }
+
+    if (picks.length > 0) return picks;
+    // The model ran but liked nothing. Same fallback, same reason.
+    return selectFromSignals(input);
+  }
+
+  private async selectFromTranscript(input: SelectInput): Promise<readonly ClipMoment[]> {
+    // Timestamps go in as PLAIN SECONDS. Feeding m:ss made the model miscompute
+    // and hallucinate out-of-range values; echoing integers back is exact.
     const transcript = input.segments
       .map((s) => `[${Math.round(s.start)}-${Math.round(s.end)}] ${s.text}`)
       .join("\n")
       .slice(0, 90_000); // keep the prompt bounded on very long videos
 
-    const loud = condensePeaks(input.peaks);
-    const chapters = input.chapters.map((c) => `[${Math.round(c.startSecond)}s] ${c.title}`).join("\n") || "none";
-
     const generated = await this.kernel.generate({
       promptId: USER_PROMPT_ID,
       systemPromptId: SYSTEM_PROMPT_ID,
       variables: {
-        theme: input.theme || "auto",
+        theme: input.plan.theme,
+        themeGuidance: input.plan.guidance,
         count: input.count,
         title: input.title,
         description: input.description.slice(0, 1500) || "none",
         durationSeconds: Math.round(input.durationSeconds),
-        loudMoments: loud || "none",
-        chapters,
+        minSeconds: input.plan.duration.min,
+        idealSeconds: input.plan.duration.ideal,
+        maxSeconds: input.plan.duration.max,
+        loudMoments: condensePeaks(input.audio.peaks) || "none",
+        surges: describeEvents(input.audio.events, input.sceneCuts) || "none",
+        chapters:
+          input.chapters.map((c) => `[${Math.round(c.startSecond)}s] ${c.title}`).join("\n") || "none",
         transcript,
       },
-      expectedOutput: { format: "json", description: "an array of clip moments" },
-      maxTokens: 1600,
+      expectedOutput: { format: "json", description: "an array of scored clip moments" },
+      maxTokens: 2000,
+      // The clip pipeline runs on OpenAI end to end — transcription, vision and
+      // now selection — so it has exactly one vendor to keep funded. The prompt
+      // registry still lists Claude as its preferred provider for other callers;
+      // an explicit provider on the request overrides that.
+      provider: "openai",
+      ...(process.env.CLIP_SELECT_MODEL?.trim()
+        ? { model: process.env.CLIP_SELECT_MODEL.trim() }
+        : {}),
     });
 
-    return parseMoments(generated.output, input.durationSeconds);
+    const parsed = parseMoments(generated.output, input.durationSeconds, input.plan);
+    const scored = parsed.map((moment) => addEvidence(moment, input));
+    return finalize(scored, input);
   }
+}
+
+/* --------------------------- signal-driven path --------------------------- */
+
+/**
+ * Find moments with no language model at all, from loudness and cuts.
+ *
+ * The core insight for sports: a goal is a SUSTAINED crowd surge, and broadcast
+ * directors always follow it with replays — so a surge with several scene cuts
+ * in the next ten seconds is near-certainly the thing the user wants. A brief
+ * spike with no replays is a whistle, a shout, or a bad bounce.
+ */
+export function selectFromSignals(input: SelectInput): readonly ClipMoment[] {
+  const { plan } = input;
+  const events = [...input.audio.events];
+  if (events.length === 0) return evenlySpacedFallback(input);
+
+  // For action themes a sustained surge is the signal; brief spikes are noise.
+  const candidates = plan.mode === "action" ? preferSurges(events) : events;
+
+  const scored = candidates.map((event) => {
+    const replayCuts = cutsInWindow(input.sceneCuts, event.endSecond, event.endSecond + 10);
+    const strength = eventStrength(event) + replayCuts * 4 * (plan.weights.scene * 2);
+
+    const rawStart = event.startSecond - plan.preRollSeconds;
+    const rawEnd = event.endSecond + plan.postRollSeconds;
+    // Start on a clean edit when one is nearby, so the clip doesn't open
+    // mid-shot. Never move it far enough to lose the build-up.
+    const snappedStart = snapToCut(rawStart, input.sceneCuts, 1.5);
+    const { start, end } = clampToDuration(snappedStart, rawEnd, plan, input.durationSeconds);
+
+    const evidence = [
+      `${event.kind === "surge" ? "crowd surge" : "spike"} +${event.prominenceDb}dB for ${event.durationSeconds}s`,
+    ];
+    if (replayCuts >= 3) evidence.push(`${replayCuts} replay cuts after`);
+
+    return {
+      startSecond: start,
+      endSecond: end,
+      hook: hookFromTranscript(input, start, end) ?? defaultHook(plan.theme),
+      reason: event.kind === "surge" ? "sustained crowd reaction" : "sharp audio spike",
+      score: strength, // normalised below
+      evidence,
+    };
+  });
+
+  return finalize(scored, input);
 }
 
 /**
- * Drop clips that collide in time. Keeps the model's best-first order: a later
- * pick is discarded if it overlaps one already accepted (with a small gap so
- * near-touching clips don't both survive). The result is re-sorted chronologically.
+ * Keep sustained surges. If there are too few to fill the request we top up with
+ * the strongest spikes rather than returning nothing.
+ */
+function preferSurges(events: readonly AudioEvent[]): AudioEvent[] {
+  const surges = events.filter((e) => e.kind === "surge");
+  if (surges.length >= 3) return surges;
+  const spikes = events.filter((e) => e.kind === "spike").slice(0, 8);
+  return [...surges, ...spikes];
+}
+
+/**
+ * Last resort: no audio events at all (a flat, quiet source). Space clips evenly
+ * so the user still gets something to react to instead of an empty result.
+ */
+function evenlySpacedFallback(input: SelectInput): readonly ClipMoment[] {
+  const { plan } = input;
+  const length = plan.duration.ideal;
+  const usable = input.durationSeconds - length;
+  if (usable <= 0) {
+    return [
+      {
+        startSecond: 0,
+        endSecond: Math.min(input.durationSeconds, plan.duration.max),
+        hook: defaultHook(plan.theme),
+        reason: "source shorter than one clip",
+        score: 50,
+        evidence: ["no audio events detected"],
+      },
+    ];
+  }
+  const count = Math.min(input.count, 4);
+  return Array.from({ length: count }, (_, i) => {
+    const start = Math.round((usable * (i + 1)) / (count + 1));
+    return {
+      startSecond: start,
+      endSecond: start + length,
+      hook: defaultHook(plan.theme),
+      reason: "evenly spaced (no usable signal)",
+      score: 40,
+      evidence: ["no audio events detected"],
+    };
+  });
+}
+
+/* ------------------------------ scoring ------------------------------ */
+
+/**
+ * Cross-check a model's pick against the measured signals. A clip that contains
+ * a real crowd surge, or sits on a replay burst, is more likely to be what the
+ * theme asked for — and for loudness-weighted themes that should move the
+ * ranking. For a speech theme like "emotional" the loudness weight is near zero,
+ * so this barely nudges anything, which is correct.
+ */
+function addEvidence(moment: ClipMoment, input: SelectInput): ClipMoment {
+  const evidence: string[] = [...moment.evidence];
+  let bonus = 0;
+
+  const inside = input.audio.events.filter(
+    (e) => e.endSecond > moment.startSecond && e.startSecond < moment.endSecond,
+  );
+  const strongest = inside.sort((a, b) => eventStrength(b) - eventStrength(a))[0];
+  if (strongest) {
+    evidence.push(
+      `${strongest.kind === "surge" ? "crowd surge" : "spike"} +${strongest.prominenceDb}dB inside`,
+    );
+    bonus += Math.min(15, strongest.prominenceDb) * input.plan.weights.loudness;
+  }
+
+  const cuts = cutsInWindow(input.sceneCuts, moment.startSecond, moment.endSecond);
+  if (cuts >= 3) {
+    evidence.push(`${cuts} scene cuts`);
+    bonus += Math.min(10, cuts) * input.plan.weights.scene;
+  }
+
+  return { ...moment, score: moment.score + bonus, evidence };
+}
+
+/**
+ * De-overlap, rank, trim to the requested count, normalise scores to 0-100, and
+ * return in chronological order (the order a user wants to receive them).
+ */
+function finalize(moments: readonly ClipMoment[], input: SelectInput): readonly ClipMoment[] {
+  const valid = moments
+    .map((m) => ({
+      ...m,
+      startSecond: Math.max(0, m.startSecond),
+      endSecond: Math.min(input.durationSeconds || m.endSecond, m.endSecond),
+    }))
+    .filter((m) => m.endSecond - m.startSecond >= input.plan.duration.min * 0.6);
+
+  const ranked = [...valid].sort((a, b) => b.score - a.score);
+  const kept = removeOverlaps(ranked).slice(0, input.count);
+  return normaliseScores(kept).sort((a, b) => a.startSecond - b.startSecond);
+}
+
+/**
+ * Map raw strengths onto a readable 0-100 band. Raw values come from different
+ * scales depending on the path (model scores vs. decibel-derived strengths), so
+ * we rank-normalise rather than pretend the raw number means anything absolute.
+ * The band stops at 97 because claiming certainty on a heuristic is dishonest.
+ */
+function normaliseScores(moments: readonly ClipMoment[]): ClipMoment[] {
+  if (moments.length === 0) return [];
+  const scores = moments.map((m) => m.score);
+  const min = Math.min(...scores);
+  const max = Math.max(...scores);
+  const span = max - min;
+  return moments.map((moment) => {
+    const normalised = span < 0.01 ? 0.75 : (moment.score - min) / span;
+    return { ...moment, score: Math.round(60 + normalised * 37) };
+  });
+}
+
+/**
+ * Drop clips that collide in time. Input must be best-first: a later pick is
+ * discarded if it overlaps one already accepted (with a small gap so
+ * near-touching clips don't both survive).
  */
 export function removeOverlaps(moments: readonly ClipMoment[]): ClipMoment[] {
   const kept: ClipMoment[] = [];
-  for (const m of moments) {
-    const collides = kept.some((k) => m.startSecond < k.endSecond - 0.5 && m.endSecond > k.startSecond + 0.5);
-    if (!collides) kept.push(m);
+  for (const moment of moments) {
+    const collides = kept.some(
+      (k) => moment.startSecond < k.endSecond - 0.5 && moment.endSecond > k.startSecond + 0.5,
+    );
+    if (!collides) kept.push(moment);
   }
-  return kept.sort((a, b) => a.startSecond - b.startSecond);
+  return kept;
 }
 
-/** Compress the loud-second list into readable second-ranges, e.g. "612-618, 1044". */
-function condensePeaks(peaks: readonly EnergyPeak[]): string {
+/* ------------------------------ formatting ------------------------------ */
+
+/** Compress the loud-second list into readable ranges, e.g. "612-618, 1044". */
+export function condensePeaks(peaks: readonly EnergyPeak[]): string {
   if (peaks.length === 0) return "";
   const seconds = [...new Set(peaks.map((p) => p.second))].sort((a, b) => a - b);
   const ranges: string[] = [];
   let start = seconds[0]!;
-  let prev = seconds[0]!;
-  for (const s of seconds.slice(1)) {
-    if (s - prev <= 3) {
-      prev = s;
+  let previous = seconds[0]!;
+  for (const second of seconds.slice(1)) {
+    if (second - previous <= 3) {
+      previous = second;
     } else {
-      ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
-      start = s;
-      prev = s;
+      ranges.push(start === previous ? `${start}` : `${start}-${previous}`);
+      start = second;
+      previous = second;
     }
   }
-  ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+  ranges.push(start === previous ? `${start}` : `${start}-${previous}`);
   return ranges.slice(0, 60).join(", ");
 }
 
-function parseMoments(output: unknown, duration: number): ClipMoment[] {
+/**
+ * The strongest events described in words the model can act on, including the
+ * replay-cut count — which is the detail that separates a goal from a shout.
+ */
+export function describeEvents(events: readonly AudioEvent[], cuts: readonly SceneCut[]): string {
+  return events
+    .slice(0, 25)
+    .map((event) => {
+      const replays = cutsInWindow(cuts, event.endSecond, event.endSecond + 10);
+      const replayNote = replays >= 3 ? `, ${replays} replay cuts after` : "";
+      return `${Math.round(event.startSecond)}-${Math.round(event.endSecond)}s ${event.kind} +${event.prominenceDb}dB${replayNote}`;
+    })
+    .join("; ");
+}
+
+/** Build a hook from whatever was said inside the window, if anything. */
+function hookFromTranscript(input: SelectInput, start: number, end: number): string | undefined {
+  const text = input.segments
+    .filter((s) => s.end > start && s.start < end)
+    .map((s) => s.text)
+    .join(" ")
+    .trim();
+  if (text.length < 12) return undefined;
+  const words = text.split(/\s+/u).slice(0, 9).join(" ");
+  return words.length > 4 ? words : undefined;
+}
+
+function defaultHook(theme: string): string {
+  return theme === "auto" ? "Best moment" : theme.replace(/\b\w/gu, (c) => c.toUpperCase()).slice(0, 60);
+}
+
+/** Force a window inside the theme's length bounds and the video's own length. */
+function clampToDuration(
+  start: number,
+  end: number,
+  plan: ThemePlan,
+  videoDuration: number,
+): { start: number; end: number } {
+  let from = Math.max(0, start);
+  let to = end;
+  if (to - from < plan.duration.min) to = from + plan.duration.min;
+  if (to - from > plan.duration.max) to = from + plan.duration.max;
+  if (videoDuration > 0 && to > videoDuration) {
+    to = videoDuration;
+    from = Math.max(0, to - plan.duration.ideal);
+  }
+  return { start: round1(from), end: round1(to) };
+}
+
+/* -------------------------------- parsing -------------------------------- */
+
+function parseMoments(output: unknown, duration: number, plan: ThemePlan): ClipMoment[] {
   let root: unknown = output;
   if (typeof output === "string") {
-    const cleaned = output.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    const cleaned = output.trim().replace(/^```(?:json)?/iu, "").replace(/```$/u, "").trim();
     try {
       root = JSON.parse(cleaned);
     } catch {
@@ -124,19 +407,30 @@ function parseMoments(output: unknown, duration: number): ClipMoment[] {
 
   const moments: ClipMoment[] = [];
   for (const item of list) {
-    const o = (item ?? {}) as Record<string, unknown>;
-    const start = toSeconds(o["startSecond"] ?? o["start"]);
-    const end = toSeconds(o["endSecond"] ?? o["end"]);
+    const record = (item ?? {}) as Record<string, unknown>;
+    const start = toSeconds(record["startSecond"] ?? record["start"]);
+    const end = toSeconds(record["endSecond"] ?? record["end"]);
     if (start === undefined || end === undefined) continue;
     // Drop hallucinated out-of-range picks instead of letting them collapse to 0.
     if (duration > 0 && start >= duration) continue;
+
     const clampedEnd = duration > 0 ? Math.min(end, duration) : end;
-    if (clampedEnd - start < 8) continue; // too short to be a clip
+    if (clampedEnd - start < plan.duration.min * 0.6) continue;
+
+    const rawScore = record["score"];
+    const score =
+      typeof rawScore === "number" && Number.isFinite(rawScore)
+        ? Math.min(100, Math.max(0, rawScore))
+        : 70;
+
     moments.push({
       startSecond: Math.max(0, start),
-      endSecond: clampedEnd,
-      hook: typeof o["hook"] === "string" ? o["hook"].slice(0, 120) : "Clip",
-      reason: typeof o["reason"] === "string" ? o["reason"].slice(0, 200) : "",
+      // Honour the theme's maximum: the model is told the bounds but does drift.
+      endSecond: Math.min(clampedEnd, start + plan.duration.max),
+      hook: typeof record["hook"] === "string" ? record["hook"].slice(0, 120) : "Clip",
+      reason: typeof record["reason"] === "string" ? record["reason"].slice(0, 200) : "",
+      score,
+      evidence: [],
     });
   }
   return moments;
@@ -146,9 +440,23 @@ function parseMoments(output: unknown, duration: number): ClipMoment[] {
 function toSeconds(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
-    const parts = value.split(":").map((p) => Number.parseFloat(p));
-    if (parts.some((p) => !Number.isFinite(p))) return undefined;
-    return parts.reduce((acc, p) => acc * 60 + p, 0);
+    const parts = value.split(":").map((part) => Number.parseFloat(part));
+    if (parts.length === 0 || parts.some((part) => !Number.isFinite(part))) return undefined;
+    return parts.reduce((accumulator, part) => accumulator * 60 + part, 0);
   }
   return undefined;
 }
+
+function short(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 160);
+}
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * Backwards-compatible alias. The old class name is still referenced by the
+ * cloud task; keeping it avoids a breaking change at the call site.
+ */
+export { ClipMomentSelector as ClaudeMomentSelectionProvider };

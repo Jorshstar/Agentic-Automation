@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { renderClip } from "../clip/render-clip.js";
 import { probeSource } from "../clip/source-download.js";
 import { probeJson } from "../lib/media.js";
+import { resolveMediaTool } from "../lib/binaries.js";
 import type { TranscriptWord } from "../clip/transcribe.js";
 
 const execFileAsync = promisify(execFile);
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
 
   // --- A) synthetic 16:9 source (color video + tone), then render one clip ---
   const src = join(dir, "src.mp4");
-  await execFileAsync("ffmpeg", [
+  await execFileAsync(await resolveMediaTool("ffmpeg"), [
     "-hide_banner", "-loglevel", "error", "-y",
     "-f", "lavfi", "-i", "color=c=0x203040:s=1280x720:d=16",
     "-f", "lavfi", "-i", "sine=frequency=320:duration=16",

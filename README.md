@@ -1000,6 +1000,220 @@ one message through the same controller from the terminal (for testing).
 
 The listener runs on this PC — keep it open (or add it to Windows startup).
 
+## Clipping — long video into vertical shorts
+
+Give it a long video and tell it what you want: **"the goals"**, **"funny moments"**,
+**"the emotional bits"**, **"key insights"**. It finds those moments, cuts them to
+1080x1920, burns captions, and sends them to Telegram.
+
+```bash
+# a link
+npx tsx src/demos/clip-run-demo.ts "https://youtu.be/XXXX" "the goals" 5
+
+# a file already on your machine
+npx tsx src/demos/clip-run-demo.ts "./output/match.mp4" "funny moments" 3
+
+# force a layout and a caption style
+npx tsx src/demos/clip-run-demo.ts "https://youtu.be/XXXX" "emotional" 4 fit clean-white
+```
+
+Or just tell the Telegram bot: *"clip the goals out of this"* with a link, or
+upload a video straight into the chat and say what you want from it.
+
+### Three ways in
+
+| Source | How | Limit |
+| ------ | --- | ----- |
+| **Link** | Anything yt-dlp handles (YouTube, Vimeo, direct MP4 URLs) | Runs on the local worker — YouTube blocks cloud IPs |
+| **Local file** | Pass a path instead of a URL | None |
+| **Telegram upload** | Send the video to the bot | **20 MB** — the Bot API's own ceiling on `getFile` |
+
+### The theme decides everything
+
+`src/clip/themes.ts` turns what you typed into a plan. A goal and a heartfelt
+confession are found in completely different ways, so they do not share settings:
+
+| Theme | Mode | Clip length | Leans on | Layout |
+| ----- | ---- | ----------- | -------- | ------ |
+| the goals, knockouts, best plays | action | ~16s | crowd roar + replay cuts | whole frame, parked high |
+| funny moments | mixed | ~22s | the laugh, plus 14s of set-up | tracked crop |
+| emotional moments | speech | ~38s | transcript only — these beats are **quiet** | tracked crop |
+| key insights, tips | speech | ~42s | transcript | tracked crop |
+| arguments, debates | speech | ~36s | transcript + raised voices | tracked crop |
+| auto (no theme given) | mixed | ~32s | balanced | tracked crop |
+
+Unknown themes fall back to `auto`. The words you typed are passed to the model
+verbatim, so "every time he mentions his dad" still steers selection even though
+no keyword matches.
+
+### How a goal is found with no commentary
+
+This is the case that used to return nothing. A music-only highlight reel has no
+transcript, so there is nothing to read — but the signal is still there:
+
+1. **Audio events.** Loudness is measured twice a second and grouped. A *spike*
+   (under 1.5s) is a shout or an impact; a **surge** (sustained) is a crowd.
+2. **Scene cuts.** A burst of cuts right after a surge is the replay package —
+   which is exactly how a broadcast director covers a goal.
+3. **Window.** Start ~9s before the surge so the build-up play is in frame, end
+   ~5s after so the celebration lands, snapped to a clean edit.
+
+No AI call, no cost. If the source *does* have speech, the transcript path runs
+instead and every pick is then cross-checked against these same signals.
+
+### Layouts
+
+- **tracked crop** — samples a few frames, asks `gpt-4o-mini` where the subject
+  is (~$0.0002 per clip), and crops 9:16 following them. Holds still unless the
+  subject actually moves, because a crop that drifts looks like camera shake.
+- **fit-top** — whole frame kept over a blurred fill, parked high with captions
+  below. Used for wide action: a 9:16 crop of a football pitch loses the play.
+- **fit** — whole frame centred over a blurred fill. The fallback, always safe.
+
+Override per run with `CLIP_REFRAME=smart|fit|fit-top` or the CLI argument.
+
+### Captions
+
+Per-word highlight with a scale pop, 2-3 words a line, heavy outline, and margins
+that clear the TikTok/Reels UI. Three presets — `bold-yellow` (default),
+`clean-white` (emotional, educational), `impact-red` (sports, conflict) — picked
+from the theme unless you override it. The hook is burned across the top for the
+first 2.4 seconds.
+
+### What it costs
+
+The expensive part is transcription, and the pipeline avoids most of it:
+
+- For a link over 10 minutes, the platform's **own auto-captions** are pulled
+  first (free) and used to *choose* moments.
+- Whisper then runs **only on the chosen windows** — about two minutes of audio
+  instead of two hours.
+- Only when auto-captions are unavailable does a full Whisper pass run.
+
+Vision reframing adds ~$0.0002 per clip. Audio and scene analysis are pure
+ffmpeg and cost nothing.
+
+### Before anything is sent
+
+Every rendered clip is probed: real duration, 1080x1920, a video stream **and an
+audio stream**, sane file size. ffmpeg exits 0 on several outcomes that are still
+broken, so a clip that fails this check is dropped rather than delivered.
+
+### Clip environment variables
+
+| Variable | Default | What it does |
+| -------- | ------- | ------------ |
+| `CLIP_REFRAME` | per theme | Force `smart`, `fit`, or `fit-top` |
+| `CLIP_RENDER_CONCURRENCY` | `2` | Clips rendered at once (each ffmpeg uses 2 threads) |
+| `CLIP_SELECT_MODEL` | `gpt-4o` | Model used to choose moments |
+| `OPENAI_MODEL` | `gpt-4o` | Default OpenAI model for the whole AI kernel |
+| `FFMPEG_PATH` / `FFPROBE_PATH` | auto | Full path to the binary, when it is not on PATH |
+| `YT_DLP_PATH` | auto-downloaded | Use a specific yt-dlp binary instead |
+| `YT_DLP_COOKIES` | unset | Netscape cookies.txt contents, for sign-in-gated videos |
+
+### Required tools
+
+ffmpeg and ffprobe must be installed; yt-dlp does not need to be, because the
+pipeline downloads the latest official standalone build itself and caches it
+(the distro package goes stale and YouTube breaks old versions).
+
+`src/lib/binaries.ts` looks for ffmpeg in this order: `FFMPEG_PATH` → the bare
+name on PATH → the usual install locations for the platform. A job checks for
+both tools **before** it downloads anything, so a missing binary is reported in
+seconds rather than after a 400 MB download.
+
+- **Windows** — `winget install Gyan.FFmpeg`, or unzip a build to `C:\ffmpeg`
+  (that location is searched automatically; adding it to PATH is optional).
+- **WSL** — `sudo apt install ffmpeg`. The Windows build under `/mnt/c` is
+  deliberately **not** used: it receives Linux paths it cannot open, and a
+  filtergraph needs a different colon escape from a plain path argument. Install
+  it inside WSL, or run the studio from Windows.
+
+### It keeps going when a provider fails
+
+Every AI stage degrades instead of ending the run — the source has already been
+downloaded and analysed by then, so losing the job over an API error wastes all
+of it. Verified against a live outage on both accounts:
+
+| Stage fails | What happens instead |
+| ----------- | -------------------- |
+| Transcription | Falls back to audio-and-cuts detection |
+| Moment selection | Same — the loudness events are still there |
+| Vision reframing | Falls back to the blurred-fit layout |
+| A single clip's render | That clip is dropped; the rest still ship |
+
+The log always names which fallback ran, so a degraded result never looks like a
+normal one.
+
+### Clipping troubleshooting
+
+- **"Couldn't fetch that upload"** — Telegram bots cannot download files over
+  20 MB. Send a link instead.
+- **No clips from a highlight reel** — check the log line for audio events. A
+  reel with a flat music bed and no crowd has no signal to find; give it a theme
+  with speech, or clip by hand.
+- **Captions out of sync** — only happens when tightening is on; it is disabled
+  automatically for action clips. Set the theme explicitly if it misread.
+- **Clips look cropped wrong** — the subject moved off-frame or the vision pass
+  was unsure. Run with `CLIP_REFRAME=fit` to keep the whole frame.
+
+## Always-on (autostart at logon)
+
+Two processes have to be running for the Telegram bot to actually work:
+
+| Process | Command | What it does |
+| ------- | ------- | ------------ |
+| Telegram agent | `npm run studio:agent` | The chat brain. Answers you and **queues** clip jobs. |
+| Clip worker | `npm run studio:clip-worker` | **Drains the queue** and renders the clips. |
+
+Running only the agent is the confusing failure: the bot cheerfully accepts
+"clip this" and nothing is ever delivered, because nothing is doing the work.
+
+To start both automatically at every Windows logon:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1
+Start-ScheduledTask -TaskName AgenticStudioAutostart   # start now, no reboot
+```
+
+That registers a hidden Scheduled Task running `scripts\studio-autostart.ps1`,
+which supervises both processes and restarts either one if it exits — with a
+longer backoff if it keeps failing immediately, so a misconfiguration does not
+spin. Logs land in `logs\`:
+
+- `logs\autostart.log` — starts, exits, restarts
+- `logs\telegram-agent.log`, `logs\clip-worker.log` — each process's own output
+
+Useful commands:
+
+```powershell
+Get-ScheduledTask -TaskName AgenticStudioAutostart | Get-ScheduledTaskInfo   # check
+Stop-ScheduledTask -TaskName AgenticStudioAutostart                          # stop
+powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1 -Uninstall
+powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1 -Visible
+```
+
+On Linux or WSL, `scripts/studio-autostart.sh` is the equivalent supervisor.
+
+### ⚠️ Only one consumer of the bot
+
+Telegram allows exactly **one** consumer of a bot's updates. The cloud
+`telegram-ingest` schedule and this local agent are both consumers, so running
+them at once makes them steal each other's messages — which looks like the bot
+randomly ignoring you. Pause the cloud schedule if you use the local agent.
+
+### If the bot goes quiet
+
+Check in this order; the first two are what actually went wrong in practice:
+
+1. **Is anything consuming updates?** If `getWebhookInfo` reports a rising
+   `pending_update_count`, nothing is reading them — the agent is not running.
+2. **Is the AI provider funded?** The agent catches its own errors and replies
+   with a generic fallback, so an unfunded provider looks like a working bot
+   saying nothing useful. `npm run clip:check` tests the account for real, and
+   `npm run studio:agent:test` exercises the brain without Telegram.
+3. **Is ffmpeg installed?** The agent chats fine without it; only clipping fails.
+
 ## Environment variables
 
 - Real secrets live in `.env` (git-ignored). A committed `.env.example` documents
@@ -1017,6 +1231,7 @@ The listener runs on this PC — keep it open (or add it to Windows startup).
 | `npm run dev`       | Start the Trigger.dev dev server      |
 | `npm run deploy`    | Deploy tasks to production            |
 | `npm run typecheck` | Type-check without emitting files     |
+| `npm test`          | Run the test suite                    |
 
 ## Roadmap (not built yet)
 

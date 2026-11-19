@@ -28,3 +28,6 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Supervisor logs from scripts/studio-autostart.*
+logs/

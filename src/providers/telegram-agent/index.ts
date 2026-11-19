@@ -24,15 +24,24 @@ export interface AgentDecision {
   readonly brief: string;
   /** Whether to use the user's attached photos/videos in the build. */
   readonly useAssets: boolean;
-  /** The video link to clip (only when action = "clip"). */
+  /**
+   * The video link to clip (action = "clip"). Empty when the user uploaded the
+   * video into the chat instead — the caller supplies that upload.
+   */
   readonly url: string;
   /** What to clip: "goals", "funny", "key insights", or "auto" (action = "clip"). */
   readonly theme: string;
   /** How many clips to make (action = "clip"). */
   readonly count: number;
+  /**
+   * How the user wants the vertical frame laid out, in THEIR words — "full
+   * screen", "show the whole video", "zoom in on him". Empty when they did not
+   * say, which leaves the theme's default in place.
+   */
+  readonly layout: string;
 }
 
-export class ClaudeTelegramAgentProvider {
+export class TelegramAgentProvider {
   private readonly kernel: AIKernel;
 
   constructor(kernel?: AIKernel) {
@@ -54,6 +63,14 @@ export class ClaudeTelegramAgentProvider {
         },
         expectedOutput: { format: "json", description: "a chat reply and a build decision" },
         maxTokens: 700,
+        // The studio runs on OpenAI, so the chat brain does too — otherwise the
+        // bot silently answers every message with its generic fallback because
+        // the generate call failed on a provider that is not funded. The prompt
+        // registry still names Claude for other callers; this overrides it.
+        provider: "openai",
+        ...(process.env.TELEGRAM_AGENT_MODEL?.trim()
+          ? { model: process.env.TELEGRAM_AGENT_MODEL.trim() }
+          : {}),
       });
       return parseDecision(generated.output);
     } catch {
@@ -66,6 +83,7 @@ export class ClaudeTelegramAgentProvider {
         url: "",
         theme: "auto",
         count: 5,
+        layout: "",
       };
     }
   }
@@ -103,13 +121,21 @@ function parseDecision(output: unknown): AgentDecision {
   const count = typeof root["count"] === "number" && Number.isFinite(root["count"])
     ? Math.min(Math.max(Math.round(root["count"]), 1), 8)
     : 5;
+  const layout = typeof root["layout"] === "string" ? root["layout"].trim().slice(0, 80) : "";
 
   // Guards: never act without what the action needs.
   if (action === "build" && brief === "") {
-    return { reply, action: "chat", brief: "", useAssets, url: "", theme, count };
+    return { reply, action: "chat", brief: "", useAssets, url: "", theme, count, layout };
   }
-  if (action === "clip" && url === "") {
-    return { reply, action: "chat", brief: "", useAssets, url: "", theme, count };
-  }
-  return { reply, action, brief, useAssets, url, theme, count };
+  // NOTE: a "clip" with an empty url is NOT downgraded here. The user may have
+  // uploaded the video into the chat instead of sharing a link, and only the
+  // caller knows whether an upload is attached. The caller does that check.
+  return { reply, action, brief, useAssets, url, theme, count, layout };
 }
+
+/**
+ * Backwards-compatible alias. The brain is no longer Claude-specific — it runs
+ * on whichever provider the request names — but the old name is still imported
+ * by the ingest task.
+ */
+export { TelegramAgentProvider as ClaudeTelegramAgentProvider };
