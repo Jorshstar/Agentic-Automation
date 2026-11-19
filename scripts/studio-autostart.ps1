@@ -38,7 +38,7 @@ Set-Location $ProjectDir
 
 function Write-Stamp([string]$Message, [string]$File) {
     $line = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
-    Add-Content -Path $File -Value $line
+    Add-Content -Path $File -Value $line -Encoding utf8
 }
 
 function Invoke-LogRotation([string]$File) {
@@ -94,12 +94,22 @@ foreach ($svc in @(
         param($ProjectDir, $LogDir, $npm, $Name, $Script, $RestartDelay, $SlowDelay, $MaxFastRestarts, $MaxLogBytes)
 
         Set-Location $ProjectDir
+
+        # A child writing to stderr is NORMAL (npm notices, our own warnings).
+        # PowerShell otherwise turns each line into a NativeCommandError record
+        # and fills the log with stack traces around ordinary output.
+        $ErrorActionPreference = 'Continue'
+        # Force UTF-8 both ways. Without this the console hands back UTF-16 and
+        # every logged line comes out as 's p a c e d   t e x t'.
+        $OutputEncoding = [System.Text.UTF8Encoding]::new()
+        [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+
         $logFile  = Join-Path $LogDir "$Name.log"
         $autostart = Join-Path $LogDir 'autostart.log'
         $failures = 0
 
         function Stamp($msg, $file) {
-            Add-Content -Path $file -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg)
+            Add-Content -Path $file -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg) -Encoding utf8
         }
 
         while ($true) {
@@ -110,8 +120,13 @@ foreach ($svc in @(
             Stamp "===== $Name start =====" $logFile
 
             $started = Get-Date
-            # Redirect both streams into the service's own log.
-            & $npm run --silent $Script *>> $logFile
+            # Merge stderr into the pipeline, flatten each record to plain text,
+            # and append as UTF-8. `*>> $logFile` looks simpler but writes UTF-16
+            # and preserves error records verbatim, which is what produced the
+            # unreadable logs this replaced.
+            & $npm run --silent $Script 2>&1 |
+                ForEach-Object { $_.ToString() } |
+                Out-File -FilePath $logFile -Append -Encoding utf8
             $ran = [int]((Get-Date) - $started).TotalSeconds
 
             # A process that ran a while hit a fresh problem; one that died
