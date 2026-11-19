@@ -13,6 +13,7 @@ import type { ReframeMode } from "./reframe.js";
 import { renderClip } from "./render-clip.js";
 import type { CaptionPresetName } from "./captions.js";
 import { checkClip, describeIssues } from "./qa.js";
+import { detectOverlays, describeRegions } from "./overlay.js";
 import { TelegramDeliveryProvider } from "../providers/delivery/index.js";
 import { TelegramClient } from "../telegram/telegram-client.js";
 import { assertMediaTools } from "../lib/binaries.js";
@@ -70,6 +71,12 @@ export interface ClipJob {
   readonly reframe?: ReframeMode | string;
   /** Override the caption style chosen for the theme. */
   readonly captionPreset?: CaptionPresetName;
+  /**
+   * Erase burned-in overlays the original poster added — their title card,
+   * username watermark, subscribe banner. Accepts true, or the user's own words
+   * ("remove the caption", "take off the watermark").
+   */
+  readonly removeOverlays?: boolean | string;
 }
 
 export interface RenderedClip {
@@ -204,6 +211,11 @@ export async function runClipJob(
   log(`✂️ Cutting ${finalMoments.length} clip(s)…`);
   // The user's words win over the theme's default, so "clip the goals but show
   // the full video" does what it says.
+  const wantsOverlayRemoval =
+    job.removeOverlays === true ||
+    (typeof job.removeOverlays === "string" && wantsOverlaysGone(job.removeOverlays)) ||
+    wantsOverlaysGone(plan.theme);
+
   const reframeMode =
     parseLayoutInstruction(job.reframe ?? "") ??
     parseLayoutInstruction(plan.theme) ??
@@ -216,6 +228,20 @@ export async function runClipJob(
     RENDER_CONCURRENCY,
     async (moment, index): Promise<RenderedClip | undefined> => {
     const outPath = join(opts.workDir, `clip-${index + 1}.mp4`);
+    // Detected per clip: a title card can be present at the start of a video and
+    // gone later, so a single whole-video scan would erase the wrong area.
+    const overlays = wantsOverlayRemoval
+      ? await detectOverlays({
+          sourcePath: source.videoPath,
+          startSecond: moment.startSecond,
+          endSecond: moment.endSecond,
+          workDir: join(opts.workDir, `clip-${index + 1}`),
+        })
+      : [];
+    if (wantsOverlayRemoval) {
+      log(`   🧹 Clip ${index + 1} overlays: ${describeRegions(overlays)}`);
+    }
+
     const reframe = await planReframe({
       sourcePath: source.videoPath,
       startSecond: moment.startSecond,
@@ -234,6 +260,7 @@ export async function runClipJob(
       reframe,
       captionPreset,
       hook: moment.hook,
+      removeOverlays: overlays,
       // Dead air is only dead when someone is supposed to be talking.
       tighten: mode !== "action",
     });
@@ -433,6 +460,16 @@ function formatTimestamp(seconds: number): string {
   return hours > 0
     ? `${hours}:${mm}:${String(secs).padStart(2, "0")}`
     : `${mm}:${String(secs).padStart(2, "0")}`;
+}
+
+/**
+ * Whether the user asked for the original poster's burned-in graphics to go.
+ * Matched on the user's own words so no flag has to be learned.
+ */
+export function wantsOverlaysGone(text: string): boolean {
+  return /\b(remove|delete|erase|take off|get rid of|hide|clean|without|no)\b[^.]{0,30}\b(caption|captions|title|titles|text|watermark|overlay|logo|banner|subtitle|subtitles|writing)\b/iu.test(
+    text,
+  );
 }
 
 /** Plain-words description of a layout, so the choice is visible in the log. */

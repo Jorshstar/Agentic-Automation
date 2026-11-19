@@ -39,7 +39,14 @@ export const clipVideo = task({
 
     try {
       const result = await runClipJob(
-        { url, theme, count, reframe: payload.reframe, captionPreset: payload.captionPreset },
+        {
+          url,
+          theme,
+          count,
+          reframe: payload.reframe,
+          captionPreset: payload.captionPreset,
+          removeOverlays: payload.removeOverlays,
+        },
         {
           workDir,
           // Progress goes straight to the chat so a long job never looks stalled.
@@ -91,6 +98,8 @@ export interface ClipVideoPayload {
   readonly reframe?: ReframeMode | string;
   /** Override the caption style the theme would choose. */
   readonly captionPreset?: CaptionPresetName;
+  /** Erase the original poster's burned-in title card, watermark or banner. */
+  readonly removeOverlays?: boolean | string;
 }
 
 export interface ClipVideoResult {

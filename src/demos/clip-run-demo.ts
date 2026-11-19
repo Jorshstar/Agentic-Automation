@@ -12,6 +12,7 @@
  *
  * Pass --no-send to render without sending anything to Telegram — use that
  * while tuning, so testing does not flood the chat.
+ * Pass --clean to erase the original poster's burned-in title card/watermark.
  *
  * Note: this used to cache the download and transcript in a fixed directory.
  * That cache was keyed on the directory alone, so a second run with a DIFFERENT
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   const flags = process.argv.filter((argument) => argument.startsWith("--"));
   const positional = process.argv.slice(2).filter((argument) => !argument.startsWith("--"));
   const deliver = !flags.includes("--no-send");
+  const removeOverlays = flags.includes("--clean");
 
   const input = positional[0];
   if (!input) {
@@ -49,7 +51,7 @@ async function main(): Promise<void> {
   const started = Date.now();
 
   const result = await runClipJob(
-    { url: input, theme, count, reframe, captionPreset },
+    { url: input, theme, count, reframe, captionPreset, removeOverlays },
     { workDir, deliver, onStep: (message) => console.log(message) },
   );
 

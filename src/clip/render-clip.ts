@@ -8,6 +8,8 @@ import { cropWidthFor, cropXExpression, NATIVE_PLAN, WIDE_CROP_ASPECT } from "./
 import { probeJson } from "../lib/media.js";
 import type { ReframePlan } from "./reframe.js";
 import { planTighten, remapWords, selectExpression } from "./tighten.js";
+import { delogoFilters } from "./overlay.js";
+import type { OverlayRegion } from "./overlay.js";
 import type { TightenPlan } from "./tighten.js";
 
 /**
@@ -66,6 +68,8 @@ export interface RenderClipInput {
   readonly hook?: string;
   /** Remove dead air and fillers. Callers disable this for action clips. */
   readonly tighten?: boolean;
+  /** Burned-in overlays to erase from the source (title cards, watermarks). */
+  readonly removeOverlays?: readonly OverlayRegion[];
 }
 
 export interface RenderResult {
@@ -136,6 +140,12 @@ export async function renderClip(input: RenderClipInput): Promise<RenderResult> 
     assPath: input.assPath,
     hasCaptions: captionWords.length > 0 || Boolean(input.hook),
     hasAudio,
+    // Erased at SOURCE resolution, before any reframing, so the coordinates the
+    // detector returned still line up with the pixels they were measured on.
+    overlays:
+      input.removeOverlays && input.removeOverlays.length > 0 && source
+        ? delogoFilters(input.removeOverlays, source.width, source.height)
+        : "",
   });
 
   const result = await runFfmpeg([
@@ -164,7 +174,14 @@ export async function renderClip(input: RenderClipInput): Promise<RenderResult> 
     input.outPath,
   ]);
 
-  const notes = [reframe.note, tighten.applied ? tighten.note : undefined, `${preset} captions`]
+  const notes = [
+    reframe.note,
+    input.removeOverlays && input.removeOverlays.length > 0
+      ? `erased ${input.removeOverlays.length} overlay(s)`
+      : undefined,
+    tighten.applied ? tighten.note : undefined,
+    `${preset} captions`,
+  ]
     .filter((note): note is string => Boolean(note))
     .join(" · ");
 
@@ -186,13 +203,24 @@ interface FilterInput {
   readonly assPath: string;
   readonly hasCaptions: boolean;
   readonly hasAudio: boolean;
+  /** Pre-built delogo chain, or "" when there is nothing to erase. */
+  readonly overlays: string;
 }
 
 function buildFilterGraph(input: FilterInput): string {
   const chains: string[] = [];
 
+  /* --- 0. erase burned-in overlays, at source resolution --- */
+  // This must come FIRST: the regions were measured against the source frame,
+  // so any crop or scale before it would move the pixels out from under them.
+  let sourceLabel = "[0:v]";
+  if (input.overlays !== "") {
+    chains.push(`[0:v]${input.overlays}[clean]`);
+    sourceLabel = "[clean]";
+  }
+
   /* --- 1. reframe to 9:16 --- */
-  chains.push(...reframeChain(input.reframe));
+  chains.push(...reframeChain(input.reframe).map((chain) => chain.replace(/\[0:v\]/gu, sourceLabel)));
   let videoLabel = "[reframed]";
 
   /* --- 2. tighten (video + audio) --- */
