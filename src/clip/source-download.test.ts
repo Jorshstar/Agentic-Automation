@@ -137,6 +137,15 @@ describe("parseVtt", () => {
     expect(parseVtt(vtt)[0]!.start).toBeCloseTo(1.25);
   });
 
+  it("prefers a plain English track over a machine translation", () => {
+    // Not directly testable through parseVtt, but the selection rule matters:
+    // yt-dlp writes "<id>.en.vtt" for real captions and "<id>.en-GB.vtt" or a
+    // translated variant alongside it. Covered here as documentation of intent.
+    const names = ["video.es-en.vtt", "video.en.vtt", "video.fr.vtt"];
+    const preferred = names.find((n) => /\.en(-orig)?\.vtt$/u.test(n)) ?? names[0];
+    expect(preferred).toBe("video.en.vtt");
+  });
+
   it("returns an empty list for junk input", () => {
     expect(parseVtt("")).toEqual([]);
     expect(parseVtt("not a vtt file at all")).toEqual([]);

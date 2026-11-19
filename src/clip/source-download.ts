@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, writeFile, chmod, access, readdir, readFile } from "node:fs/promises";
+import { mkdir, writeFile, chmod, access, readdir, readFile, rm } from "node:fs/promises";
 import { probeDurationSeconds } from "../lib/media.js";
 import type { TranscriptSegment } from "./transcribe.js";
 import { join } from "node:path";
@@ -230,6 +230,11 @@ export async function resolveSource(input: string, dir: string): Promise<Downloa
  */
 export async function fetchAutoCaptions(url: string, dir: string): Promise<TranscriptSegment[] | undefined> {
   try {
+    // Start from an EMPTY directory. We pick the subtitle file up off disk after
+    // yt-dlp runs, so anything left from a previous fetch is indistinguishable
+    // from a fresh download — a source with no captions of its own would silently
+    // inherit the last video's transcript and be clipped from the wrong words.
+    await rm(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
     const cookies = await cookieArgs(dir);
     const output = join(dir, "subs");
@@ -253,7 +258,9 @@ export async function fetchAutoCaptions(url: string, dir: string): Promise<Trans
 
     const files = (await readdir(dir)).filter((name) => name.endsWith(".vtt"));
     if (files.length === 0) return undefined;
-    const vtt = await readFile(join(dir, files[0]!), "utf8");
+    // Prefer a plain English track over a machine translation when both exist.
+    const preferred = files.find((name) => /\.en(-orig)?\.vtt$/u.test(name)) ?? files[0]!;
+    const vtt = await readFile(join(dir, preferred), "utf8");
     const segments = parseVtt(vtt);
     return segments.length > 0 ? segments : undefined;
   } catch {
