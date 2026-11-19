@@ -180,7 +180,14 @@ export async function renderClip(input: RenderClipInput): Promise<RenderResult> 
       ? `erased ${input.removeOverlays.length} overlay(s)`
       : undefined,
     tighten.applied ? tighten.note : undefined,
-    `${preset} captions`,
+    // Report what was actually burned. Saying "bold-yellow captions" on a clip
+    // with no captions on it makes the log agree with itself instead of with
+    // the output, which is how a wrong default stays hidden.
+    captionWords.length > 0
+      ? `${preset} captions`
+      : input.hook
+        ? `${preset} title card`
+        : "no captions",
   ]
     .filter((note): note is string => Boolean(note))
     .join(" · ");
