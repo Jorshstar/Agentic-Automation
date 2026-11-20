@@ -120,7 +120,7 @@ export async function detectOverlays(input: DetectOverlaysInput): Promise<readon
   }
 }
 
-interface LumaFrames {
+export interface LumaFrames {
   readonly frames: readonly Uint8Array[];
   readonly width: number;
   readonly height: number;
@@ -131,7 +131,7 @@ interface LumaFrames {
  * Greyscale at 192px wide is plenty to tell a static caption bar from moving
  * footage, and keeps the whole clip's pixel data to a few megabytes.
  */
-async function sampleLuma(input: DetectOverlaysInput): Promise<LumaFrames> {
+export async function sampleLuma(input: DetectOverlaysInput): Promise<LumaFrames> {
   const duration = Math.max(1, input.endSecond - input.startSecond);
   const fps = SAMPLES / duration;
   const ffmpeg = await resolveMediaTool("ffmpeg");

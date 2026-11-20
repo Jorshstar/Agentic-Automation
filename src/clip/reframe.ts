@@ -4,6 +4,8 @@ import { resolveMediaTool } from "../lib/binaries.js";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { probeJson } from "../lib/media.js";
+import { sampleLuma } from "./overlay.js";
+import { estimateSubject, estimateSubjectOverTime } from "./subject.js";
 import type { ThemePlan } from "./themes.js";
 
 const execFileAsync = promisify(execFile);
@@ -21,10 +23,11 @@ const execFileAsync = promisify(execFile);
  * to what the viewer sees, so the user chooses.
  *
  * Subject-tracked cropping is available but opt-in, because it fills the screen
- * by discarding the sides of the frame. When it is on, we avoid a face-detection
- * dependency by sampling a handful of frames and asking a vision model where the
- * subject is — it returns a COORDINATE, not an image. ffmpeg does the cropping.
- * That costs about $0.0002 per clip on gpt-4o-mini at low detail.
+ * by discarding the sides of the frame. When it is on, the subject is located by
+ * MEASURING MOTION: in a talking-head shot the person moves and the room does
+ * not, so the centre of mass of per-column change is the subject. Deterministic,
+ * free, and no model involved — see subject.ts for why the vision call that used
+ * to do this was removed.
  *
  * Three layouts, chosen by content type:
  *
@@ -55,7 +58,7 @@ export interface ReframePlan {
   readonly sourceHeight?: number;
   /** For "crop": the smoothed path the crop window follows. Empty = static. */
   readonly keyframes: readonly ReframeKeyframe[];
-  /** Human-readable note for logs ("vision: 6/6 frames, static crop"). */
+  /** Human-readable note for logs ("motion 3 window(s), static crop @ 0.72"). */
   readonly note: string;
 }
 
@@ -68,19 +71,20 @@ export const FIT_PLAN: ReframePlan = { kind: "fit", keyframes: [], note: "blurre
  */
 export const NATIVE_PLAN: ReframePlan = { kind: "native", keyframes: [], note: "original size, untouched" };
 
-/** Max frames we ever send to the vision model for one clip. */
+/** Frames sampled when a diagnostic needs to show what was measured. */
 const MAX_SAMPLES = 7;
 const MIN_SAMPLES = 3;
-/** Below this confidence a frame's answer is discarded. */
-const MIN_CONFIDENCE = 0.45;
+/**
+ * Belt and braces: estimateSubject already returns nothing below its own
+ * threshold, so this only guards against the two drifting apart.
+ */
+const MIN_CONFIDENCE = 0.7;
 /**
  * If the subject moves less than this fraction of frame width across the whole
  * clip, hold the crop still. A crop that drifts a few pixels looks like a
  * wobble, which is worse than no movement at all.
  */
 const STATIC_DEVIATION = 0.05;
-/** Vision model: cheapest one that reliably localises a subject in a frame. */
-const VISION_MODEL = "gpt-4o-mini";
 
 export type ReframeMode = "native" | "smart" | "wide" | "fit" | "fit-top";
 
@@ -106,9 +110,8 @@ export const WIDE_CROP_ASPECT = 4 / 5;
  * field.
  *
  * To be explicit about the one thing people assume: no AI model generates,
- * redraws, upscales or "enhances" any frame. The vision pass only READS a few
- * sampled frames and returns a number — where the subject is. Every pixel
- * operation is plain ffmpeg.
+ * redraws, upscales or "enhances" any frame — and since the vision call was
+ * removed, no model touches this path at all. Every pixel operation is ffmpeg.
  */
 export function defaultModeForTheme(_plan: ThemePlan): ReframeMode {
   const override = parseLayoutInstruction(process.env.CLIP_REFRAME ?? "");
@@ -207,42 +210,39 @@ export async function planReframe(input: PlanReframeInput): Promise<ReframePlan>
     return { kind: "fit-top", sourceWidth, sourceHeight, keyframes: [], note: "whole frame, parked high" };
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return { ...FIT_PLAN, sourceWidth, sourceHeight, note: "no OPENAI_API_KEY — blurred fit" };
-  }
   if (!sourceWidth || !sourceHeight) {
     return { ...FIT_PLAN, note: "could not probe source size — blurred fit" };
   }
 
   const duration = Math.max(1, input.endSecond - input.startSecond);
-  const sampleDir = join(input.workDir, "reframe");
   try {
-    const timestamps = sampleTimestamps(input.startSecond, duration);
-    const frames = await extractFrames(input.sourcePath, timestamps, sampleDir);
-    if (frames.length < MIN_SAMPLES) {
-      return { ...FIT_PLAN, sourceWidth, sourceHeight, note: "frame sampling failed — blurred fit" };
-    }
-
-    const located = await locateSubjects(apiKey, frames.map((f) => f.jpegBase64));
-    const usable = located
-      .map((result, index) => ({ result, second: timestamps[index]! - input.startSecond }))
-      .filter((entry) => entry.result !== undefined && entry.result.confidence >= MIN_CONFIDENCE);
-
-    if (usable.length < MIN_SAMPLES) {
-      return {
-        ...FIT_PLAN,
-        sourceWidth,
-        sourceHeight,
-        note: `vision unsure (${usable.length}/${frames.length}) — blurred fit`,
-      };
-    }
-
-    const raw = usable.map((entry) => ({ second: entry.second, xCenter: entry.result!.x }));
-    const smoothed = smooth(raw);
-    const deviation = spread(smoothed.map((k) => k.xCenter));
-
+    const luma = await sampleLuma({
+      sourcePath: input.sourcePath,
+      startSecond: input.startSecond,
+      endSecond: input.endSecond,
+      workDir: input.workDir,
+    });
     const kind: ReframeKind = input.mode === "wide" ? "crop-wide" : "crop";
+
+    // Enough frames to see movement across the clip, but few enough windows
+    // that each still has frames to compare.
+    const windows = Math.min(6, Math.max(2, Math.round(duration / 5)));
+    const samples = estimateSubjectOverTime(luma, windows)
+      .filter((sample) => sample.estimate && sample.estimate.confidence >= MIN_CONFIDENCE)
+      .map((sample) => ({
+        second: sample.at * duration,
+        xCenter: sample.estimate!.xCenter,
+      }));
+
+    if (samples.length === 0) {
+      // Nothing to lock onto — a static shot, a crowd, a camera pan. Centre is a
+      // guess, and guessing is how a crop quietly cuts the speaker out, so keep
+      // the whole frame instead.
+      return { ...FIT_PLAN, sourceWidth, sourceHeight, note: "no clear subject — blurred fit" };
+    }
+
+    const smoothed = smooth(samples);
+    const deviation = spread(smoothed.map((keyframe) => keyframe.xCenter));
 
     if (deviation < STATIC_DEVIATION) {
       const mean = smoothed.reduce((sum, k) => sum + k.xCenter, 0) / smoothed.length;
@@ -251,7 +251,7 @@ export async function planReframe(input: PlanReframeInput): Promise<ReframePlan>
         sourceWidth,
         sourceHeight,
         keyframes: [{ second: 0, xCenter: mean }],
-        note: `vision ${usable.length}/${frames.length}, static crop @ ${mean.toFixed(2)}`,
+        note: `motion ${samples.length} window(s), static crop @ ${mean.toFixed(2)}`,
       };
     }
 
@@ -260,13 +260,58 @@ export async function planReframe(input: PlanReframeInput): Promise<ReframePlan>
       sourceWidth,
       sourceHeight,
       keyframes: smoothed,
-      note: `vision ${usable.length}/${frames.length}, tracking crop (${smoothed.length} keyframes)`,
+      note: `motion ${samples.length} window(s), tracking crop (${smoothed.length} keyframes)`,
     };
   } catch {
-    return { ...FIT_PLAN, sourceWidth, sourceHeight, note: "reframe failed — blurred fit" };
-  } finally {
-    await rm(sampleDir, { recursive: true, force: true }).catch(() => undefined);
+    return { ...FIT_PLAN, sourceWidth, sourceHeight, note: "subject detection failed — blurred fit" };
   }
+}
+
+/* ------------------------------ diagnostics ------------------------------ */
+
+/** What the detector measured, for inspection. */
+export interface SubjectProbe {
+  readonly second: number;
+  /** Clip-local time this window is centred on. */
+  readonly localSecond: number;
+  readonly framePath: string;
+  readonly xCenter?: number;
+  readonly confidence?: number;
+}
+
+/**
+ * Run subject detection and report the raw result, with a frame from each
+ * window saved so a human can see whether the answer is on the speaker.
+ *
+ * This exists because the previous detector failed invisibly: it returned
+ * exactly 0.50 at 0.90 confidence for every frame, which looks like success in
+ * a log and produces a plausible centre crop. Used by `npm run clip:reframe`.
+ */
+export async function probeSubjects(input: PlanReframeInput): Promise<readonly SubjectProbe[]> {
+  const duration = Math.max(1, input.endSecond - input.startSecond);
+  const luma = await sampleLuma({
+    sourcePath: input.sourcePath,
+    startSecond: input.startSecond,
+    endSecond: input.endSecond,
+    workDir: input.workDir,
+  });
+
+  const windows = Math.min(6, Math.max(2, Math.round(duration / 5)));
+  const samples = estimateSubjectOverTime(luma, windows);
+
+  // One real frame per window, so the measurement can be checked against what
+  // was actually on screen.
+  const timestamps = samples.map((sample) => input.startSecond + sample.at * duration);
+  const frames = await extractFrames(input.sourcePath, timestamps, input.workDir);
+
+  return samples.map((sample, index) => ({
+    second: timestamps[index]!,
+    localSecond: sample.at * duration,
+    framePath: frames[index]?.path ?? "",
+    ...(sample.estimate
+      ? { xCenter: sample.estimate.xCenter, confidence: sample.estimate.confidence }
+      : {}),
+  }));
 }
 
 /* ------------------------------- sampling ------------------------------- */
@@ -286,13 +331,14 @@ function sampleTimestamps(startSecond: number, duration: number): number[] {
 interface SampledFrame {
   readonly second: number;
   readonly jpegBase64: string;
+  /** Kept so the diagnostic can show the frame the model was given. */
+  readonly path: string;
 }
 
 /**
  * Pull single frames with input-side seeking (-ss before -i), which jumps
- * straight to the keyframe instead of decoding from zero. Downscaled to 512px:
- * the vision model runs at low detail anyway, so anything larger is wasted
- * bandwidth and tokens.
+ * straight to the keyframe instead of decoding from zero. Downscaled to 512px,
+ * which is plenty for a human checking where the detector pointed.
  */
 async function extractFrames(
   sourcePath: string,
@@ -318,91 +364,13 @@ async function extractFrames(
           { timeout: 60_000 },
         );
         const buffer = await readFile(path);
-        return { second, jpegBase64: buffer.toString("base64") };
+        return { second, jpegBase64: buffer.toString("base64"), path };
       } catch {
         return undefined;
       }
     }),
   );
   return results.filter((frame): frame is SampledFrame => frame !== undefined);
-}
-
-/* -------------------------------- vision -------------------------------- */
-
-interface SubjectLocation {
-  readonly x: number;
-  readonly confidence: number;
-}
-
-const VISION_INSTRUCTION =
-  "Each image is one frame from a video, in order. For EACH frame, report the horizontal centre " +
-  "of the MAIN SUBJECT a viewer's eye goes to — the person speaking, the face, or the focus of " +
-  "the action. Use a 0..1 scale where 0 is the left edge and 1 is the right edge of the frame. " +
-  "If several people are present, choose the one who is speaking or most prominent. If the frame " +
-  "is a title card, a blank, or has no clear subject, give your best guess with low confidence. " +
-  'Reply with ONLY this JSON: {"frames":[{"i":0,"x":0.5,"confidence":0.0}]} — one entry per frame, ' +
-  "in the same order, i starting at 0. confidence is 0..1.";
-
-/**
- * One request carrying every frame, so we pay a single prompt overhead rather
- * than one per frame. `detail: "low"` fixes each image at 85 tokens.
- */
-async function locateSubjects(apiKey: string, framesBase64: readonly string[]): Promise<(SubjectLocation | undefined)[]> {
-  const content: unknown[] = [{ type: "text", text: VISION_INSTRUCTION }];
-  for (const base64 of framesBase64) {
-    content.push({
-      type: "image_url",
-      image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "low" },
-    });
-  }
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: VISION_MODEL,
-      messages: [{ role: "user", content }],
-      response_format: { type: "json_object" },
-      max_tokens: 400,
-      temperature: 0,
-    }),
-    signal: AbortSignal.timeout(90_000),
-  });
-  if (!response.ok) return framesBase64.map(() => undefined);
-
-  const payload = (await response.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const text = payload.choices?.[0]?.message?.content;
-  if (!text) return framesBase64.map(() => undefined);
-
-  let parsed: { frames?: { i?: number; x?: number; confidence?: number }[] };
-  try {
-    parsed = JSON.parse(text) as typeof parsed;
-  } catch {
-    return framesBase64.map(() => undefined);
-  }
-
-  const byIndex: (SubjectLocation | undefined)[] = framesBase64.map(() => undefined);
-  for (const [position, entry] of (parsed.frames ?? []).entries()) {
-    const index = typeof entry.i === "number" ? entry.i : position;
-    const x = entry.x;
-    const confidence = entry.confidence;
-    if (
-      index >= 0 &&
-      index < byIndex.length &&
-      typeof x === "number" &&
-      Number.isFinite(x) &&
-      x >= 0 &&
-      x <= 1
-    ) {
-      byIndex[index] = {
-        x,
-        confidence: typeof confidence === "number" && Number.isFinite(confidence) ? confidence : 0.5,
-      };
-    }
-  }
-  return byIndex;
 }
 
 /* ------------------------------- smoothing ------------------------------- */
