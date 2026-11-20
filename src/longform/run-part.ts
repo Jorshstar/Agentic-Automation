@@ -11,6 +11,9 @@ import { LongformScriptWriter, WORDS_PER_MINUTE } from "./script.js";
 import type { ScriptBeat } from "./script.js";
 import { ScriptVerifier } from "./verify.js";
 import { SeriesPlanner, briefForPart } from "./outline.js";
+import { LongformThumbnailMaker } from "./thumbnail.js";
+import { ClaudeSeoProvider } from "../providers/seo/index.js";
+import { createClaudeAIKernel } from "../ai/index.js";
 import {
   createSeriesStore,
   continuationBrief,
@@ -70,6 +73,12 @@ export interface PartResult {
   readonly citations: readonly string[];
   /** True when the writer judged the subject finished. */
   readonly complete: boolean;
+  /** 16:9 cover image, or "" when one could not be made. */
+  readonly thumbnailPath: string;
+  /** Title, description and tags for upload, when the kit was produced. */
+  readonly youtubeTitle: string;
+  readonly youtubeDescription: string;
+  readonly tags: readonly string[];
 }
 
 export async function runPart(request: PartRequest, store: SeriesStore = createSeriesStore()): Promise<PartResult> {
@@ -243,6 +252,40 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
     },
   });
 
+  /* --------------------------- cover and upload kit --------------------------- */
+  // Both are best-effort. A missing thumbnail or title is a nuisance; failing a
+  // finished video over one would be worse, so neither can abort the run.
+  const narration = beats.map((beat) => beat.text).join(" ");
+
+  log("🖼 Designing the cover…");
+  const thumbnail = await new LongformThumbnailMaker()
+    .make({
+      title: script.title,
+      topic,
+      part,
+      script: narration,
+      style: STYLE,
+      outputDir: `${workDir}/thumbnail`,
+    })
+    .catch(() => ({ widePath: "", text: "", scene: "" }));
+  log(thumbnail.widePath ? `   "${thumbnail.text}"` : "   cover failed — continuing without one");
+
+  log("🔖 Writing the upload kit…");
+  const seo = await new ClaudeSeoProvider(createClaudeAIKernel())
+    .generate({
+      topic: `${topic} — part ${part}: ${script.title}`,
+      hook: beats[0]?.text ?? "",
+      script: narration,
+      niche: "documentary",
+      tone: "dry, factual, narrative",
+      audience: "people who like well-researched explainer videos",
+      keywords: [topic],
+      durationSeconds: composed.durationSeconds,
+      platform: "YouTube",
+    })
+    .catch(() => undefined);
+  if (seo?.youtube?.title) log(`   "${seo.youtube.title}"`);
+
   /* -------------------------- remember this part -------------------------- */
   const record: SeriesRecord = {
     seriesId,
@@ -286,6 +329,15 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
     imagesCostUsd: Math.round(made * imagePriceUsd() * 100) / 100,
     citations: sources.citations,
     complete: script.complete,
+    thumbnailPath: thumbnail.widePath,
+    youtubeTitle: seo?.youtube?.title ?? "",
+    // Sources belong in the description: the format's whole claim is that the
+    // facts are checkable, which they are not if nobody can see where they came
+    // from.
+    youtubeDescription: seo?.youtube?.description
+      ? `${seo.youtube.description}\n\nSources:\n${sources.citations.join("\n")}`
+      : "",
+    tags: seo?.youtube?.tags ?? [],
   };
 }
 

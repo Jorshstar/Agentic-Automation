@@ -1,4 +1,5 @@
 import type { AIKernel, AIGenerateRequest } from "../../ai/index.js";
+import { textProviderOptions } from "../../ai/text-provider.js";
 import type { SeoProvider } from "./seo-provider.js";
 import type {
   SeoRequest,
@@ -47,7 +48,12 @@ export class ClaudeSeoProvider implements SeoProvider {
         platform: request.platform ?? "YouTube Shorts and TikTok",
       },
       expectedOutput: { format: "json", description: "a YouTube + TikTok upload kit" },
-      maxTokens: 900,
+      // Generous because reasoning models spend part of the budget thinking
+      // before they write, and a short budget returns an empty completion with
+      // a 200 status.
+      maxTokens: 2000,
+      // SEO is text work, so it follows whichever text endpoint is configured.
+      ...textProviderOptions("SEO_MODEL"),
     };
 
     try {
