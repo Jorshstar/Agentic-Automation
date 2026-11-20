@@ -1,4 +1,5 @@
 import type { AIKernel } from "../ai/index.js";
+import { textProviderOptions } from "../ai/text-provider.js";
 import { createClaudeAIKernel } from "../ai/index.js";
 import type { ScriptBeat } from "./script.js";
 
@@ -65,10 +66,7 @@ export class ScriptVerifier {
         variables: { sourceText, beats: numbered, beatCount: beats.length },
         expectedOutput: { format: "json", description: "a verdict per beat" },
         maxTokens: 3000,
-        provider: "openai",
-        ...(process.env.LONGFORM_VERIFY_MODEL?.trim()
-          ? { model: process.env.LONGFORM_VERIFY_MODEL.trim() }
-          : {}),
+        ...textProviderOptions("LONGFORM_VERIFY_MODEL"),
       });
       checks = parseChecks(generated.output, beats.length);
     } catch {

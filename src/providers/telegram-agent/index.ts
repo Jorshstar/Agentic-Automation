@@ -1,4 +1,5 @@
 import type { AIKernel } from "../../ai/index.js";
+import { textProviderOptions } from "../../ai/text-provider.js";
 import { createClaudeAIKernel } from "../../ai/index.js";
 import type { ChatMessage } from "../../telegram/upload-session.js";
 
@@ -81,14 +82,11 @@ export class TelegramAgentProvider {
         },
         expectedOutput: { format: "json", description: "a chat reply and a build decision" },
         maxTokens: 700,
-        // The studio runs on OpenAI, so the chat brain does too — otherwise the
-        // bot silently answers every message with its generic fallback because
-        // the generate call failed on a provider that is not funded. The prompt
-        // registry still names Claude for other callers; this overrides it.
-        provider: "openai",
-        ...(process.env.TELEGRAM_AGENT_MODEL?.trim()
-          ? { model: process.env.TELEGRAM_AGENT_MODEL.trim() }
-          : {}),
+        // The chat brain is text work, so it follows whichever text endpoint
+        // is configured. Without this it would use the prompt registry's
+        // preferred provider and fail on an unfunded account, which the brain
+        // swallows into its generic fallback reply.
+        ...textProviderOptions("TELEGRAM_AGENT_MODEL"),
       });
       return parseDecision(generated.output);
     } catch {

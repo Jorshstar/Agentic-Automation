@@ -1,4 +1,5 @@
 import type { AIKernel } from "../ai/index.js";
+import { textProviderOptions } from "../ai/text-provider.js";
 import { createClaudeAIKernel } from "../ai/index.js";
 import type { TranscriptSegment } from "./transcribe.js";
 import type { AudioAnalysis, AudioEvent, EnergyPeak } from "./audio-energy.js";
@@ -123,14 +124,10 @@ export class ClipMomentSelector {
       },
       expectedOutput: { format: "json", description: "an array of scored clip moments" },
       maxTokens: 2000,
-      // The clip pipeline runs on OpenAI end to end — transcription, vision and
-      // now selection — so it has exactly one vendor to keep funded. The prompt
-      // registry still lists Claude as its preferred provider for other callers;
-      // an explicit provider on the request overrides that.
-      provider: "openai",
-      ...(process.env.CLIP_SELECT_MODEL?.trim()
-        ? { model: process.env.CLIP_SELECT_MODEL.trim() }
-        : {}),
+      // Selection is text work, so it can run on a custom endpoint. The
+      // prompt registry still lists Claude as its preferred provider for other
+      // callers; an explicit provider on the request overrides that.
+      ...textProviderOptions("CLIP_SELECT_MODEL"),
     });
 
     const parsed = parseMoments(generated.output, input.durationSeconds, input.plan);

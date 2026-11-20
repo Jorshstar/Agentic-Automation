@@ -17,6 +17,21 @@ export function createProviderClient(provider: ProviderName = "mock"): ProviderC
       return new ClaudeProviderClient();
     case "openai":
       return new OpenAIProviderClient();
+    case "local":
+      // Any OpenAI-compatible endpoint: a self-hosted server, a gateway, a
+      // different vendor's compatible API. Same wire format, so the same client
+      // serves it — only the address, key and model differ.
+      return new OpenAIProviderClient({
+        provider: "local",
+        apiKey: process.env.LLM_API_KEY ?? "",
+        baseUrl: process.env.LLM_BASE_URL ?? "",
+        defaultModel: process.env.LLM_MODEL?.trim() || undefined,
+        // Reasoning models spend completion budget thinking before they write.
+        // Measured on gpt-oss-120b: a 30-token request returned HTTP 200 with
+        // empty content because 27 tokens went to reasoning. This floor keeps
+        // a small request from silently producing nothing.
+        minMaxTokens: Number(process.env.LLM_MIN_MAX_TOKENS ?? 2000),
+      });
     default:
       return new MockProviderClient();
   }

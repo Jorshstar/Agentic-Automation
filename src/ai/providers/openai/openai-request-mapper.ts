@@ -37,7 +37,17 @@ export function resolveModel(requested: string): string {
   return requested;
 }
 
-export function toOpenAIRequest(request: ProviderRequest): OpenAIChatRequest {
+/**
+ * @param minMaxTokens Floor for max_tokens. Reasoning models spend part of the
+ * completion budget thinking before they write, so a tight budget returns HTTP
+ * 200 with EMPTY content — measured on gpt-oss-120b, where a 30-token request
+ * was consumed entirely by 27 reasoning tokens. Raising the floor is what keeps
+ * a stage from silently producing nothing.
+ */
+export function toOpenAIRequest(
+  request: ProviderRequest,
+  minMaxTokens?: number,
+): OpenAIChatRequest {
   const messages: OpenAIMessage[] = [];
   if (request.systemPrompt !== undefined && request.systemPrompt.trim() !== "") {
     messages.push({ role: "system", content: request.systemPrompt });
@@ -54,9 +64,21 @@ export function toOpenAIRequest(request: ProviderRequest): OpenAIChatRequest {
     // check is explicit rather than assumed.
     messages: wantsJson && !mentionsJson(messages) ? withJsonNote(messages) : messages,
     temperature: request.temperature,
-    ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
+    ...(resolveMaxTokens(request.maxTokens, minMaxTokens) !== undefined
+      ? { max_tokens: resolveMaxTokens(request.maxTokens, minMaxTokens) }
+      : {}),
     ...(wantsJson ? { response_format: { type: "json_object" as const } } : {}),
   };
+}
+
+/** The larger of what the caller asked for and the endpoint's floor. */
+export function resolveMaxTokens(
+  requested: number | undefined,
+  floor: number | undefined,
+): number | undefined {
+  if (floor === undefined) return requested;
+  if (requested === undefined) return floor;
+  return Math.max(requested, floor);
 }
 
 function mentionsJson(messages: readonly OpenAIMessage[]): boolean {

@@ -1,4 +1,5 @@
 import type { AIKernel } from "../ai/index.js";
+import { textProviderOptions } from "../ai/text-provider.js";
 import { createClaudeAIKernel } from "../ai/index.js";
 
 /**
@@ -107,11 +108,9 @@ export class LongformScriptWriter {
       },
       expectedOutput: { format: "json", description: "a documentary script as beats" },
       maxTokens: 4000,
-      // The studio runs on OpenAI end to end.
-      provider: "openai",
-      ...(process.env.LONGFORM_SCRIPT_MODEL?.trim()
-        ? { model: process.env.LONGFORM_SCRIPT_MODEL.trim() }
-        : {}),
+      // Text work can run on any OpenAI-compatible endpoint; images and
+      // speech cannot, so they are chosen separately.
+      ...textProviderOptions("LONGFORM_SCRIPT_MODEL"),
     });
 
     return parseScript(generated.output, request.topic);
