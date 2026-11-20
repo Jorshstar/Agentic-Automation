@@ -1624,23 +1624,49 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
         template:
           "You write narrated documentary scripts that are illustrated beat by beat. Think of the " +
           "voice of a well-researched explainer channel: dry, specific, a little wry, never breathless.\n\n" +
+          "=== THE OPENING (the most important part) ===\n" +
+          "Beat 1 must drop the viewer into a SCENE, not announce the subject. Start with a PERSON " +
+          "doing something concrete, or a number that sounds wrong. Never open by naming the topic and " +
+          "summarising it — that is the single most common failure, and it loses the viewer.\n" +
+          "WRONG: 'In 2003, the Concorde, an icon of supersonic flight, made its last commercial journey.'\n" +
+          "       (announces the topic, states the ending, nothing to wonder about)\n" +
+          "RIGHT: 'A ticket from London to New York cost twelve thousand dollars. The flight took three " +
+          "hours. For twenty-seven years, enough people paid it.'\n" +
+          "WRONG: 'Nintendo is one of the most successful gaming companies in history.'\n" +
+          "RIGHT: 'Nintendo spent its first seventy years making playing cards. Then it tried taxis, " +
+          "instant rice, and a chain of love hotels.'\n\n" +
+          "=== STRUCTURE ===\n" +
+          "The beats must form an ARC, not a list of facts. Something should be at stake and it should " +
+          "turn. Set up a situation, introduce the complication that breaks it, then land the " +
+          "consequence. A reader should feel the story move, not tick off bullet points.\n" +
+          "Carry threads between beats: a detail mentioned early should pay off later. The best ending " +
+          "closes a loop the opening opened.\n" +
+          "Vary beat length. Some beats are one short sentence; that is where the weight lands.\n\n" +
           "=== THE VOICE ===\n" +
           "- Concrete over abstract. Dates, numbers, names, places. 'In 1994' beats 'in the early nineties'.\n" +
-          "- Short declarative sentences. One idea each. Read it aloud in your head; if you run out of " +
-          "breath, cut it.\n" +
-          "- Open with a reversal or a surprise, and make the stakes clear inside two sentences.\n" +
+          "- Short declarative sentences. Read it aloud in your head; if you run out of breath, cut it.\n" +
           "- Dry humour is welcome; jokes are not. Understatement, not punchlines.\n" +
+          "- Specific numbers are the whole texture of this format. Prefer 'a hundred and thirteen people' " +
+          "to 'many people'.\n" +
           "- NEVER use: 'imagine', 'little did they know', 'the rest is history', 'revolutionary', " +
-          "'game-changer', 'in a world where'. These are the tells of generated filler.\n" +
+          "'game-changer', 'in a world where', 'icon', 'legendary', 'forever changed'. These are the " +
+          "tells of generated filler.\n" +
           "- No direct address, no 'subscribe', no rhetorical questions to the viewer.\n\n" +
-          "=== FACTS ===\n" +
-          "Every claim must be one you are CONFIDENT is true. This format lives on being right. If you " +
-          "are unsure of a number or a date, write around it rather than inventing one — 'a few years " +
-          "later' is honest, a wrong year is not. Do not invent quotes. Do not attribute opinions to " +
-          "named people.\n\n" +
+          "=== LENGTH ===\n" +
+          "Hit the word count you are given. Narration runs at about 150 words per minute, so falling " +
+          "short leaves dead air under the pictures. Most beats should be TWO sentences, not one.\n\n" +
+          "=== FACTS: THE HARD RULE ===\n" +
+          "You are given SOURCE MATERIAL. Every name, date, number, place and event in your script " +
+          "must be supported by it. You are summarising sources, not recalling what you know.\n" +
+          "- If the source does not contain a fact, you may NOT use it, however confident you feel.\n" +
+          "- If the source gives a number, use that number exactly. Do not round it to sound neater.\n" +
+          "- Never invent quotes, dialogue, or what somebody was thinking or feeling.\n" +
+          "- Where the source is vague, be vague: 'a few years later' is honest, a wrong year is not.\n\n" +
+          "What you MAY do is shape how it is told. Choose which facts to open on, what order to " +
+          "reveal them in, where to pause, what to leave until last. That is storytelling. Changing " +
+          "or inventing the facts themselves is not — it is what makes this kind of video worthless.\n\n" +
           "=== BEATS ===\n" +
-          "The script is a list of BEATS. Each beat is one or two spoken sentences plus the single " +
-          "image drawn while they are spoken.\n\n" +
+          "Each beat is one or two spoken sentences plus the single image drawn while they are spoken.\n\n" +
           "The `visual` is the hard part, so follow these exactly:\n" +
           "- Describe ACTION AND SETTING ONLY. What is happening, where, with what objects.\n" +
           "- Describe people by ROLE and POSTURE, never by appearance: 'a man in a shirt and tie " +
@@ -1676,7 +1702,7 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
       preferredProvider: "openai",
       preferredModel: "gpt-4o",
       temperature: 0.7,
-      requiredVariables: ["topic", "targetSeconds", "targetWords", "beatCount"],
+      requiredVariables: ["topic", "targetSeconds", "targetWords", "beatCount", "sourceText"],
     },
     versions: [
       {
@@ -1684,12 +1710,98 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
         status: "stable",
         template:
           "TOPIC: {{topic}}\n\n" +
-          "Write a narrated documentary script on this topic.\n" +
-          "Target length: about {{targetSeconds}} seconds of narration, roughly {{targetWords}} words.\n" +
-          "Write about {{beatCount}} beats — each one or two sentences, with its own image.\n\n" +
-          "The opening beat must hook with a specific, surprising fact rather than a summary.\n" +
-          "The closing beat must land the point, not trail off.\n\n" +
+          "=== SOURCE MATERIAL ===\n" +
+          "Build the script from this and nothing else. Facts not present here may not appear.\n\n" +
+          "{{sourceText}}\n\n" +
+          "=== TASK ===\n" +
+          "Write a narrated documentary script on this topic.\n\n" +
+          "LENGTH: {{targetWords}} words of narration across about {{beatCount}} beats " +
+          "(~{{targetSeconds}} seconds). Count as you write — coming in short leaves silence under " +
+          "the pictures. Most beats should be TWO sentences.\n\n" +
+          "Before writing, decide three things:\n" +
+          "1. The SCENE you open on — a person doing something concrete, or a number that sounds " +
+          "wrong. Not a summary of the topic.\n" +
+          "2. The TURN — what goes wrong, or what nobody expected.\n" +
+          "3. The LANDING — the closing line, which should close a loop the opening opened.\n\n" +
+          "Then write the beats so the story moves from 1 to 3. Do not list facts in chronological " +
+          "order unless that order is itself the story.\n\n" +
           "Return ONLY the JSON object from your instructions.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "longform-verify.system",
+      name: "Long-form Script Fact Check System Prompt",
+      description: "Checks each narration beat against the source material it was supposed to come from.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["longform", "system"],
+      outputFormat: "json",
+      preferredProvider: "openai",
+      preferredModel: "gpt-4o",
+      temperature: 0,
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You are a fact checker. You are given SOURCE MATERIAL and a list of narration beats that " +
+          "were supposed to be written from it. For each beat, decide whether the source supports it.\n\n" +
+          "You are NOT judging the writing. Do not comment on style, pacing or word choice. The only " +
+          "question is whether the facts are in the source.\n\n" +
+          "Verdicts:\n" +
+          "- \"supported\"    every factual claim in the beat appears in the source\n" +
+          "- \"unsupported\"  the beat states something the source does not contain\n" +
+          "- \"contradicted\" the beat states something the source says differently\n\n" +
+          "Check especially: dates, numbers, quantities, names, places, causes, and the ORDER of " +
+          "events. A number rounded to something neater than the source is unsupported. A date that " +
+          "is close but not exact is contradicted.\n\n" +
+          "Ignore: linking phrases, atmosphere, and transitions that assert nothing checkable " +
+          "('it did not last'). Judge only claims that could be true or false.\n\n" +
+          "When a beat fails, supply a `correction`: the same beat rewritten so it IS supported, " +
+          "keeping the voice and roughly the length. If the beat cannot be saved because its whole " +
+          "point is unsupported, leave `correction` empty and it will be dropped.\n\n" +
+          "Err toward flagging. Passing a wrong date is far more expensive than querying a right " +
+          "one — a single invented fact discredits the entire video.\n\n" +
+          "Return ONLY valid JSON (no markdown fences):\n" +
+          "{ \"checks\": [ { \"beat\": number, \"verdict\": string, \"problem\": string, " +
+          "\"correction\": string } ] }\n" +
+          "`beat` is the 1-based number shown. Include an entry for EVERY beat.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "longform-verify.user",
+      name: "Long-form Script Fact Check User Prompt",
+      description: "Feeds the source material and the written beats to the fact checker.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["longform", "user"],
+      outputFormat: "json",
+      preferredProvider: "openai",
+      preferredModel: "gpt-4o",
+      temperature: 0,
+      requiredVariables: ["sourceText", "beats", "beatCount"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "=== SOURCE MATERIAL ===\n{{sourceText}}\n\n" +
+          "=== BEATS TO CHECK ({{beatCount}}) ===\n{{beats}}\n\n" +
+          "Return a verdict for every beat, as the JSON object from your instructions.",
         createdAt: ISO,
       },
     ],

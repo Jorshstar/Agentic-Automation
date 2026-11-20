@@ -30,6 +30,8 @@ import { OpenAIVoiceGenerationProvider } from "../providers/voice-generation/ind
 import { FfmpegCompositionProvider } from "../providers/composition/index.js";
 import { assertMediaTools } from "../lib/binaries.js";
 import { LongformScriptWriter, WORDS_PER_MINUTE } from "../longform/script.js";
+import { research } from "../longform/research.js";
+import { ScriptVerifier } from "../longform/verify.js";
 import type { ScriptBeat } from "../longform/script.js";
 import type { AssetPlan } from "../providers/asset-planning/index.js";
 import type { NarrativeScript } from "../providers/narrative/index.js";
@@ -134,19 +136,50 @@ async function main(): Promise<void> {
 
   console.log(`Topic: ${topic}  (~${targetSeconds}s)\n`);
 
-  console.log("Writing…");
-  const script = await new LongformScriptWriter().write({ topic, targetSeconds });
+  console.log("Researching…");
+  const sources = await research(topic);
+  if (sources.articles.length === 0) {
+    console.log("  no sources found — the script will be UNGROUNDED, treat its facts with suspicion");
+  } else {
+    console.log(`  ${sources.articles.length} article(s), ${sources.sourceText.length} chars`);
+    for (const article of sources.articles) console.log(`   ${article.title} — ${article.url}`);
+  }
+
+  console.log("\nWriting…");
+  const script = await new LongformScriptWriter().write({
+    topic,
+    targetSeconds,
+    sourceText: sources.sourceText,
+  });
   if (script.beats.length === 0) {
     console.error("The writer returned no usable beats.");
     process.exitCode = 1;
     return;
   }
   console.log(`  "${script.title}" — ${script.beats.length} beats, ${script.estimatedWords} words`);
-  for (const [index, beat] of script.beats.entries()) {
-    console.log(`   ${index + 1}. ${beat.text}`);
+
+  console.log("\nFact checking…");
+  const verified = await new ScriptVerifier().verify(script.beats, sources.sourceText);
+  if (verified.checks.length === 0) {
+    console.log("  not checked (no sources, or the checker failed) — facts are UNVERIFIED");
+  } else {
+    console.log(`  ${verified.checks.length} beats checked, ${verified.problems.length} flagged`);
+    for (const problem of verified.problems) {
+      console.log(`   beat ${problem.index + 1} ${problem.verdict}: ${problem.problem.slice(0, 140)}`);
+      console.log(problem.correction ? `     -> ${problem.correction.slice(0, 140)}` : "     -> dropped");
+    }
   }
 
-  const narrative = buildNarrative(script.beats);
+  const beats = verified.beats;
+  if (beats.length === 0) {
+    console.error("Every beat failed the fact check — refusing to build a video from it.");
+    process.exitCode = 1;
+    return;
+  }
+  console.log("");
+  for (const [index, beat] of beats.entries()) console.log(`   ${index + 1}. ${beat.text}`);
+
+  const narrative = buildNarrative(beats);
 
   console.log("\nNarrating…");
   const voiceover = await new OpenAIVoiceGenerationProvider().generate({
@@ -160,7 +193,7 @@ async function main(): Promise<void> {
   console.log("Illustrating…");
   const images = await new OpenAIImageGenerationProvider().generate({
     assetPlan: buildAssetPlan(
-      script.beats,
+      beats,
       voiceover.segments.map((segment) => segment.segmentId),
     ),
     context: {
@@ -171,7 +204,7 @@ async function main(): Promise<void> {
     },
   });
   const made = images.images.filter((image) => image.status === "generated").length;
-  console.log(`  ${made}/${script.beats.length} images`);
+  console.log(`  ${made}/${beats.length} images`);
   for (const warning of images.warnings) {
     console.log(`  WARN ${warning.segmentId ?? ""} ${warning.code}: ${warning.message.slice(0, 100)}`);
   }
@@ -198,6 +231,7 @@ async function main(): Promise<void> {
       `${composed.durationSeconds.toFixed(1)}s  ${(composed.metadata.sizeBytes / 1_000_000).toFixed(1)}MB`,
   );
   console.log(`Images cost roughly $${(made * 0.02).toFixed(2)}.`);
+  if (sources.citations.length > 0) console.log(`Sources: ${sources.citations.join(", ")}`);
 }
 
 main().catch((error: unknown) => {

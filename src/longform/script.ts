@@ -46,6 +46,14 @@ export const WORDS_PER_MINUTE = 150;
 export interface ScriptRequest {
   readonly topic: string;
   readonly targetSeconds: number;
+  /**
+   * Fetched source material the script must be built from.
+   *
+   * Without this the writer works from memory, and a model asked about history
+   * produces fluent, specific, confidently WRONG dates. With it, the job
+   * becomes summary rather than recall.
+   */
+  readonly sourceText?: string;
 }
 
 export class LongformScriptWriter {
@@ -69,6 +77,11 @@ export class LongformScriptWriter {
         targetSeconds: Math.round(request.targetSeconds),
         targetWords,
         beatCount,
+        sourceText:
+          request.sourceText && request.sourceText.trim() !== ""
+            ? request.sourceText
+            : "(no sources were found — say only what you are certain of, and prefer vaguer " +
+              "phrasing to an invented number)",
       },
       expectedOutput: { format: "json", description: "a documentary script as beats" },
       maxTokens: 4000,
