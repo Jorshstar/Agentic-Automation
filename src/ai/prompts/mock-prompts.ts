@@ -1788,6 +1788,7 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
         "sourceText",
         "part",
         "previously",
+        "brief",
       ],
     },
     versions: [
@@ -1803,8 +1804,10 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "{{sourceText}}\n\n" +
           "=== TASK ===\n" +
           "Write a narrated documentary script on this topic.\n\n" +
-          "SCOPE: this is part {{part}} of a series that will run for many parts. Cover only the " +
-          "next NARROW SLICE of the story and tell it properly. Do not summarise the whole subject.\n\n" +
+          "=== THIS PART'S PLAN ===\n{{brief}}\n\n" +
+          "Follow that plan. It was made by reading the whole source, so it knows what this part " +
+          "should cover and what the source can actually support — staying inside it is what keeps " +
+          "the facts checkable.\n\n" +
           "LENGTH: {{targetWords}} words of narration across about {{beatCount}} beats " +
           "(~{{targetSeconds}} seconds). Count as you write — coming in short leaves silence under " +
           "the pictures. Most beats should be TWO sentences.\n\n" +
@@ -1894,6 +1897,93 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "=== SOURCE MATERIAL ===\n{{sourceText}}\n\n" +
           "=== BEATS TO CHECK ({{beatCount}}) ===\n{{beats}}\n\n" +
           "Return a verdict for every beat, as the JSON object from your instructions.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "longform-outline.system",
+      name: "Documentary Series Outline System Prompt",
+      description: "Plans a multi-part documentary from the source material, honestly sized to what it covers.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["longform", "system"],
+      outputFormat: "json",
+      preferredProvider: "openai",
+      preferredModel: "gpt-4o",
+      temperature: 0.5,
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You plan documentary series. Given SOURCE MATERIAL on a subject, decide how to tell it " +
+          "across several short videos, one part at a time.\n\n" +
+          "=== HOW MANY PARTS: SIZE IT TO THE SOURCE ===\n" +
+          "This is the decision that matters most, and the instinct to get wrong is padding.\n" +
+          "Read the source and ask what it ACTUALLY covers in detail. Sources are rarely even: an " +
+          "article may be dense on a founding and thin on the years after, and a part built on the " +
+          "thin ground forces the writer to invent — which then gets cut, leaving a short, hollow " +
+          "video.\n" +
+          "So plan only as many parts as the source genuinely supports. FOUR well-sourced parts beat " +
+          "ten where six are guesswork. Say in `note` where the source runs out and why you stopped " +
+          "there.\n" +
+          "Each part is about {{secondsPerPart}} seconds, roughly 150 words a minute, so one part is " +
+          "a single chapter — one phase, one crisis, one rivalry. Not an era.\n\n" +
+          "=== THE ARC ===\n" +
+          "The parts together are one story, so plan the shape:\n" +
+          "- Part one opens on the most arresting thing the source gives you, not the earliest.\n" +
+          "- Each part should raise a question the next one answers.\n" +
+          "- The last part lands the point and closes a loop the first part opened.\n" +
+          "Do not simply slice the timeline into equal pieces. Choose cut points where something " +
+          "turns, so each part has its own shape.\n\n" +
+          "=== EACH PART ===\n" +
+          "`covers` is a brief to the writer: which events, people and figures from the source belong " +
+          "to this part. Name them specifically — it is what stops the writer wandering outside what " +
+          "the source supports.\n" +
+          "`endsOn` is the unresolved hook, and it must be something the SOURCE says happens next. " +
+          "Not invented suspense.\n" +
+          "`title` names the part, not the whole subject.\n\n" +
+          "=== OUTPUT ===\n" +
+          "Return ONLY valid JSON (no markdown fences):\n" +
+          "{ \"parts\": [ { \"part\": number, \"title\": string, \"covers\": string, " +
+          "\"endsOn\": string } ], \"note\": string }",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "longform-outline.user",
+      name: "Documentary Series Outline User Prompt",
+      description: "Feeds the topic and sources to the series planner.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["longform", "user"],
+      outputFormat: "json",
+      preferredProvider: "openai",
+      preferredModel: "gpt-4o",
+      temperature: 0.5,
+      requiredVariables: ["topic", "sourceText", "secondsPerPart"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "TOPIC: {{topic}}\n\n" +
+          "=== SOURCE MATERIAL ===\n{{sourceText}}\n\n" +
+          "Plan the series. Be honest about how many parts this source can carry — padding it with " +
+          "parts the material does not cover produces hollow videos.\n\n" +
+          "Return ONLY the JSON object from your instructions.",
         createdAt: ISO,
       },
     ],

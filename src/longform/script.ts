@@ -72,6 +72,13 @@ export interface ScriptRequest {
   readonly previously?: string;
   /** Which part this is. 1 unless continuing a series. */
   readonly part?: number;
+  /**
+   * This part's slot in the planned outline: what it covers and how it ends.
+   *
+   * Without it the writer only knows what came BEFORE, so it cannot pace the
+   * arc or stay on ground the source actually supports.
+   */
+  readonly brief?: string;
 }
 
 export class LongformScriptWriter {
@@ -101,6 +108,10 @@ export class LongformScriptWriter {
             : "(no sources were found — say only what you are certain of, and prefer vaguer " +
               "phrasing to an invented number)",
         part: request.part ?? 1,
+        brief:
+          request.brief && request.brief.trim() !== ""
+            ? request.brief
+            : "(no outline for this part — choose the next sensible slice yourself)",
         previously:
           request.previously && request.previously.trim() !== ""
             ? request.previously
@@ -110,7 +121,14 @@ export class LongformScriptWriter {
       maxTokens: 4000,
       // Text work can run on any OpenAI-compatible endpoint; images and
       // speech cannot, so they are chosen separately.
-      ...textProviderOptions("LONGFORM_SCRIPT_MODEL"),
+      // Writing defaults to OPENAI even when a custom endpoint is configured.
+      // Measured: the same prompt on gpt-oss-120b had eight of nine beats
+      // flagged as unsupported — invented memos, invented engagement figures, a
+      // "Project Reels" team that never existed — against one of nine on
+      // gpt-4o. A script is one call per part, so the saving was never worth an
+      // eightfold invention rate. Set LONGFORM_SCRIPT_PROVIDER=local to
+      // override.
+      ...textProviderOptions("LONGFORM_SCRIPT_MODEL", "LONGFORM_SCRIPT_PROVIDER"),
     });
 
     return parseScript(generated.output, request.topic);

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { withRetry } from "../lib/retry.js";
+import type { SeriesOutline } from "./outline.js";
 
 /**
  * SERIES STATE — what a multi-part documentary has already covered.
@@ -37,6 +38,14 @@ export interface SeriesPart {
 export interface SeriesRecord {
   readonly seriesId: string;
   readonly topic: string;
+  /**
+   * The whole arc, planned once from the sources on the first part.
+   *
+   * Stored so later parts need no re-planning, and so the series knows how many
+   * parts the material actually supports rather than running until the writer
+   * is inventing.
+   */
+  readonly outline?: SeriesOutline;
   /** Source URLs, kept so later parts cite the same material. */
   readonly citations: readonly string[];
   readonly parts: readonly SeriesPart[];

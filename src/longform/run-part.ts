@@ -10,6 +10,7 @@ import { research } from "./research.js";
 import { LongformScriptWriter, WORDS_PER_MINUTE } from "./script.js";
 import type { ScriptBeat } from "./script.js";
 import { ScriptVerifier } from "./verify.js";
+import { SeriesPlanner, briefForPart } from "./outline.js";
 import {
   createSeriesStore,
   continuationBrief,
@@ -106,6 +107,30 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
   }
   log(`   ${sources.articles.map((article) => article.title).join(", ")}`);
 
+  /* ------------------------------- outline ------------------------------- */
+  // Planned ONCE, on the first part, and reused thereafter. Besides saving a
+  // call per part, it is what lets the writer pace the arc and stay on ground
+  // the source actually covers — a part built on thin material has its beats
+  // flagged and cut, leaving a short hollow video.
+  let outline = existing?.outline;
+  if (!outline || outline.parts.length === 0) {
+    log("🗺 Planning the series…");
+    outline = await new SeriesPlanner().plan(topic, sources.sourceText, targetSeconds);
+    if (outline.parts.length > 0) {
+      log(`   ${outline.totalParts} part(s) planned${outline.note ? ` — ${outline.note}` : ""}`);
+      for (const slot of outline.parts) log(`   ${slot.part}. ${slot.title}`);
+    } else {
+      log("   planner returned nothing usable — each part will choose its own slice");
+    }
+  }
+
+  if (outline.parts.length > 0 && part > outline.totalParts) {
+    throw new Error(
+      `The outline plans ${outline.totalParts} part(s) and this would be part ${part}. ` +
+        "The sources do not support more — continuing would mean inventing.",
+    );
+  }
+
   /* ------------------------------- script ------------------------------- */
   log("✍️ Writing…");
   const script = await new LongformScriptWriter().write({
@@ -114,6 +139,7 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
     sourceText: sources.sourceText,
     previously: continuationBrief(existing),
     part,
+    brief: briefForPart(outline, part),
   });
   if (script.beats.length === 0) throw new Error("The writer returned no usable beats.");
   log(`   "${script.title}" — ${script.beats.length} beats, ${script.estimatedWords} words`);
@@ -221,6 +247,7 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
   const record: SeriesRecord = {
     seriesId,
     topic,
+    outline,
     citations: sources.citations,
     parts: [
       ...(existing?.parts ?? []),
@@ -239,7 +266,10 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
         videoPath: composed.videoPath,
       },
     ],
-    complete: script.complete,
+    // Complete when the writer says so, or when the plan is used up. The
+    // second matters more: left to itself a series runs until the material is
+    // gone and the beats start getting cut.
+    complete: script.complete || (outline.parts.length > 0 && part >= outline.totalParts),
   };
   await store.save(record);
 

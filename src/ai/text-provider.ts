@@ -31,11 +31,34 @@ export function textProvider(): ProviderName {
  * endpoint serves one model and a prompt's `preferredModel` names an OpenAI
  * one it has never heard of.
  */
-export function textProviderOptions(modelEnvVar?: string): {
-  provider: ProviderName;
-  model?: string;
-} {
+export function textProviderOptions(
+  modelEnvVar?: string,
+  /**
+   * Env var naming a provider for THIS stage specifically, e.g.
+   * LONGFORM_SCRIPT_PROVIDER=openai.
+   *
+   * Stages are not interchangeable, and that is measured rather than assumed.
+   * Running a documentary part on gpt-oss-120b had the fact checker flag EIGHT
+   * of nine beats — invented internal memos, invented engagement figures, a
+   * secret team called "Project Reels" that never existed — against one of nine
+   * for the same prompt on gpt-4o. The same model CHECKED facts well, catching
+   * every one of those. So writing wants the stronger model while verifying,
+   * selecting and chatting are fine on a cheaper one, and a per-stage override
+   * is how that is expressed.
+   */
+  providerEnvVar?: string,
+): { provider: ProviderName; model?: string } {
+  const forced = providerEnvVar ? process.env[providerEnvVar]?.trim().toLowerCase() : undefined;
+  const model = modelEnvVar ? process.env[modelEnvVar]?.trim() : undefined;
+
+  if (forced === "openai") return { provider: "openai", ...(model ? { model } : {}) };
+  if (forced === "local") return { provider: "local" };
+
+  // A stage that names a provider env var but has not set it is opting OUT of
+  // the custom endpoint by default — that is how writing stays on the stronger
+  // model while verifying, selecting and chatting move to the cheaper one.
+  if (providerEnvVar) return { provider: "openai", ...(model ? { model } : {}) };
+
   if (hasCustomTextEndpoint()) return { provider: "local" };
-  const override = modelEnvVar ? process.env[modelEnvVar]?.trim() : undefined;
-  return { provider: "openai", ...(override ? { model: override } : {}) };
+  return { provider: "openai", ...(model ? { model } : {}) };
 }
