@@ -139,11 +139,21 @@ async function main(): Promise<void> {
   console.log("Researching…");
   const sources = await research(topic);
   if (sources.articles.length === 0) {
-    console.log("  no sources found — the script will be UNGROUNDED, treat its facts with suspicion");
-  } else {
-    console.log(`  ${sources.articles.length} article(s), ${sources.sourceText.length} chars`);
-    for (const article of sources.articles) console.log(`   ${article.title} — ${article.url}`);
+    // Refuse rather than narrate from memory. An ungrounded script is fluent,
+    // confident and unverifiable — exactly the thing this format must not ship.
+    // The two cases get different advice because they need different fixes.
+    console.error(
+      sources.failure === "failed"
+        ? "  Source lookup FAILED (rate limited, offline, or the API changed).\n" +
+            "  Refusing to write from memory. Try again in a minute."
+        : `  No sources found for "${topic}".\n` +
+            "  Refusing to write from memory — try naming the subject more directly.",
+    );
+    process.exitCode = 1;
+    return;
   }
+  console.log(`  ${sources.articles.length} article(s), ${sources.sourceText.length} chars`);
+  for (const article of sources.articles) console.log(`   ${article.title} — ${article.url}`);
 
   console.log("\nWriting…");
   const script = await new LongformScriptWriter().write({
