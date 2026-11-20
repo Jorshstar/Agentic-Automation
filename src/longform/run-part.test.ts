@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fillImageGaps } from "./run-part.js";
+import { fillImageGaps, summariseShipped } from "./run-part.js";
 import type { GeneratedImage, GeneratedImages } from "../providers/image-generation/index.js";
 
 const image = (segmentId: string, ok = true): GeneratedImage =>
@@ -71,5 +71,28 @@ describe("fillImageGaps", () => {
   it("does nothing when there is nothing to borrow", () => {
     const result = fillImageGaps(wrap([]), ids);
     expect(result.reused).toBe(0);
+  });
+});
+
+describe("summariseShipped", () => {
+  const beat = (text: string) => ({ text, visual: "" });
+
+  it("leaves the summary alone when nothing was dropped", () => {
+    const summary = "This part covered the founding.";
+    expect(summariseShipped(summary, 3, [beat("a"), beat("b"), beat("c")])).toBe(summary);
+  });
+
+  it("corrects a summary that describes a deleted beat", () => {
+    // The real case: the writer said the part ended on a cliffhanger about a
+    // competitor, and the fact check had removed exactly that beat.
+    const summary = "It ended on a cliffhanger about emerging competition.";
+    const result = summariseShipped(summary, 9, [beat("first"), beat("Facebook showed interest.")]);
+    expect(result).toContain(summary);
+    expect(result).toContain("7 beat(s) were removed");
+    expect(result).toContain("Facebook showed interest.");
+  });
+
+  it("does not annotate when every beat was dropped", () => {
+    expect(summariseShipped("x", 3, [])).toBe("x");
   });
 });

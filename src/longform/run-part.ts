@@ -136,13 +136,32 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
   log("🎙 Narrating…");
   const voiceover = await new OpenAIVoiceGenerationProvider().generate({
     narrative: buildNarrative(beats),
-    context: { outputDir: `${workDir}/audio` },
+    context: {
+      outputDir: `${workDir}/audio`,
+      // Slightly faster than natural. Explainer channels run quick — the
+      // reference video sits near 154 words per minute — and at 1.0 the
+      // narration drags, which drags the pictures with it because each image is
+      // held for exactly as long as its line takes to say. Raising this speeds
+      // the WHOLE video uniformly rather than just the voice.
+      speed: Number(process.env.LONGFORM_VOICE_SPEED ?? 1.12),
+    },
   });
 
   log("🎨 Illustrating…");
   const images = await new OpenAIImageGenerationProvider().generate({
     assetPlan: buildAssetPlan(beats, voiceover.segments.map((segment) => segment.segmentId)),
-    context: { size: "1536x1024", styleSuffix: STYLE, outputDir: `${workDir}/images` },
+    context: {
+      size: "1536x1024",
+      // "medium" rather than the studio-wide "low". Low is genuinely fine for a
+      // throwaway test — flat cartoon art barely uses the extra detail budget —
+      // but this is published work, and the difference costs about thirteen
+      // cents a part. Measured on gpt-image-2.6-flare at 1536x1024: 664 output
+      // tokens at low against 1,132 at medium, or $0.020 against $0.034 an
+      // image. Override with LONGFORM_IMAGE_QUALITY.
+      quality: process.env.LONGFORM_IMAGE_QUALITY?.trim() || "medium",
+      styleSuffix: STYLE,
+      outputDir: `${workDir}/images`,
+    },
   });
   const made = images.images.filter((image) => image.status === "generated").length;
   log(`   ${made}/${beats.length} images`);
@@ -189,7 +208,13 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
       {
         part,
         title: script.title,
-        summary: script.summary,
+        // The writer summarises BEFORE the fact check runs, so its summary can
+        // describe beats that were then dropped — one run ended "on a
+        // cliffhanger hinting at emerging competition" when exactly that beat
+        // had been removed as unsupported. The next part would then be told to
+        // continue from something the viewer never saw. Correcting the summary
+        // against what actually shipped keeps the series honest with itself.
+        summary: summariseShipped(script.summary, script.beats.length, beats),
         lastLine: beats.at(-1)!.text,
         createdAt: new Date().toISOString(),
         videoPath: composed.videoPath,
@@ -207,13 +232,58 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
     durationSeconds: composed.durationSeconds,
     beats: beats.length,
     flagged: verified.problems.length,
-    imagesCostUsd: Math.round(made * 0.02 * 100) / 100,
+    // Per-image cost tracks the quality tier, so a report does not quietly
+    // keep quoting the cheap price after the tier has been raised.
+    imagesCostUsd: Math.round(made * imagePriceUsd() * 100) / 100,
     citations: sources.citations,
     complete: script.complete,
   };
 }
 
 /* -------------------------------- helpers -------------------------------- */
+
+/**
+ * The summary as it applies to what SHIPPED, not what was written.
+ *
+ * When the fact check drops beats, the writer's own summary can describe
+ * material that is no longer in the video. Rather than ask for a fresh summary
+ * — another call, and the writer would only be guessing at its own cuts — the
+ * summary is annotated with how the part really ends, which is what the next
+ * part needs in order to continue from the right place.
+ */
+export function summariseShipped(
+  written: string,
+  writtenBeats: number,
+  shipped: readonly ScriptBeat[],
+): string {
+  const base = written.trim();
+  if (shipped.length === writtenBeats || shipped.length === 0) return base;
+
+  const dropped = writtenBeats - shipped.length;
+  return (
+    `${base}\n\n(Note: ${dropped} beat(s) were removed by the fact check, so this part ` +
+    `actually ends on: "${shipped.at(-1)!.text}")`
+  );
+}
+
+/**
+ * Measured cost of one image at the configured quality tier.
+ *
+ * Images are billed per output token at $30/1M, and the tier moves that a lot:
+ * on gpt-image-2.6-flare at 1536x1024, low came back at 664 output tokens and
+ * medium at 1,132. Hard-coding one number would mean a run kept reporting the
+ * cheap price after the tier was raised.
+ */
+function imagePriceUsd(): number {
+  switch (process.env.LONGFORM_IMAGE_QUALITY?.trim() || "medium") {
+    case "low":
+      return 0.02;
+    case "high":
+      return 0.17;
+    default:
+      return 0.034;
+  }
+}
 
 /**
  * Give every narration segment an image, borrowing from its neighbours when its

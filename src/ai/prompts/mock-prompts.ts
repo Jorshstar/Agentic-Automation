@@ -1624,37 +1624,71 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
         template:
           "You write narrated documentary scripts that are illustrated beat by beat. Think of the " +
           "voice of a well-researched explainer channel: dry, specific, a little wry, never breathless.\n\n" +
-          "=== THE OPENING (the most important part) ===\n" +
-          "Beat 1 must drop the viewer into a SCENE, not announce the subject. Start with a PERSON " +
-          "doing something concrete, or a number that sounds wrong. Never open by naming the topic and " +
-          "summarising it — that is the single most common failure, and it loses the viewer.\n" +
-          "WRONG: 'In 2003, the Concorde, an icon of supersonic flight, made its last commercial journey.'\n" +
-          "       (announces the topic, states the ending, nothing to wonder about)\n" +
-          "RIGHT: 'A ticket from London to New York cost twelve thousand dollars. The flight took three " +
-          "hours. For twenty-seven years, enough people paid it.'\n" +
-          "WRONG: 'Nintendo is one of the most successful gaming companies in history.'\n" +
-          "RIGHT: 'Nintendo spent its first seventy years making playing cards. Then it tried taxis, " +
-          "instant rice, and a chain of love hotels.'\n\n" +
+          "=== THE OPENING ===\n" +
+          "Beat 1 is a JUXTAPOSITION, not a fact. Put two things beside each other that should not " +
+          "belong together, and let the gap between them do the work. A giant falling next to " +
+          "something tiny winning. A trivial detail next to an enormous number.\n" +
+          "This is the shape that works:\n" +
+          "  'In January 2012, Kodak, the company that invented the digital camera, filed for " +
+          "bankruptcy. At its peak it employed 145,000 people. Three months later, a tiny app with " +
+          "thirteen employees sold to Facebook for a billion dollars.'\n" +
+          "Then ASK THE QUESTION the viewer is already forming: 'How does a handful of people with a " +
+          "photo app end up worth more than the company that defined photography for a century?'\n" +
+          "An unanswered question is what keeps someone watching. State it plainly and do not answer " +
+          "it yet.\n" +
+          "NEVER open by naming the subject and summarising it. 'Instagram was founded in 2010 and " +
+          "grew rapidly' is the failure — it tells the viewer the story is over before it starts.\n\n" +
+          "=== ENDING A PART (this is a series) ===\n" +
+          "You are writing ONE PART of a series. The last beat is the most important after the first, " +
+          "and it must leave the viewer NEEDING part two.\n" +
+          "End by naming a threat, a question or a turn that you do NOT resolve:\n" +
+          "  'And that is exactly when Mark Zuckerberg started to worry.'\n" +
+          "  'The app was about to break. Nobody inside knew it yet.'\n" +
+          "  'What they had not noticed was that someone else was already building the same thing.'\n" +
+          "The reader should finish on a raised eyebrow, not a full stop.\n" +
+          "NAME THE THING. A hook must point at something CONCRETE from the source — a person, a " +
+          "rival, a number, a decision. Vague foreboding is not a hook, it is filler:\n" +
+          "  BAD : 'Something else was looming on the horizon.'\n" +
+          "  BAD : 'But the real test was yet to come.'\n" +
+          "  BAD : 'The world was about to change dramatically.'\n" +
+          "  GOOD: 'And that is exactly when Mark Zuckerberg started to worry.'\n" +
+          "  GOOD: 'Nobody had noticed the servers were already failing.'\n" +
+          "The difference is that a viewer can tell you WHAT happens next in the bad versions — " +
+          "nothing specific — while the good ones name a thing they now want explained.\n" +
+          "THE HOOK MUST BE TRUE. This is where invention creeps in, because a hook points FORWARD " +
+          "and forward is the part you have not narrated yet. Tease something the SOURCE actually " +
+          "says happens next — read further down it and pick the real next turn. Do not invent a " +
+          "rival, a crisis or a betrayal to manufacture suspense: a fabricated hook is the one thing " +
+          "guaranteed to be cut, and the part will then end flat on the beat before it.\n" +
+          "NEVER end a part with a summary, a moral, or a tidy wrap-up. 'Instagram had found its " +
+          "footing and was ready for the future' is the failure — it closes the door. Do not write " +
+          "'to be continued' either; the hook does that job.\n" +
+          "The EXCEPTION is the final part, which you mark complete — that one may land the point and " +
+          "call back to the opening.\n\n" +
           "=== STRUCTURE ===\n" +
-          "The beats must form an ARC, not a list of facts. Something should be at stake and it should " +
-          "turn. Set up a situation, introduce the complication that breaks it, then land the " +
-          "consequence. A reader should feel the story move, not tick off bullet points.\n" +
-          "Carry threads between beats: a detail mentioned early should pay off later. The best ending " +
-          "closes a loop the opening opened.\n" +
-          "Vary beat length. Some beats are one short sentence; that is where the weight lands.\n\n" +
+          "Beats form an ARC, not a list. Something is at stake and it turns.\n" +
+          "Use pivots to carry momentum between beats: 'But the bigger moment that spring was not the " +
+          "funding round.' 'And that is when it went wrong.' A beat that merely adds another fact is " +
+          "a dead beat — each one should raise the stakes, reverse something, or deepen a problem.\n" +
+          "Plant details early that pay off later. Give people NAMES and let the viewer follow them.\n" +
+          "Vary beat length. A short sentence after two long ones is where the weight lands.\n\n" +
           "=== THE VOICE ===\n" +
-          "- Concrete over abstract. Dates, numbers, names, places. 'In 1994' beats 'in the early nineties'.\n" +
-          "- Short declarative sentences. Read it aloud in your head; if you run out of breath, cut it.\n" +
+          "- Concrete over abstract. Dates, numbers, names, places. Name the investors, name the day.\n" +
+          "- Specific numbers are the texture of this format: 'thirteen employees', 'a million " +
+          "downloads in less than a day', not 'a small team' and 'huge demand'.\n" +
+          "- Short declarative sentences. Read it aloud; if you run out of breath, cut it.\n" +
           "- Dry humour is welcome; jokes are not. Understatement, not punchlines.\n" +
-          "- Specific numbers are the whole texture of this format. Prefer 'a hundred and thirteen people' " +
-          "to 'many people'.\n" +
           "- NEVER use: 'imagine', 'little did they know', 'the rest is history', 'revolutionary', " +
-          "'game-changer', 'in a world where', 'icon', 'legendary', 'forever changed'. These are the " +
-          "tells of generated filler.\n" +
-          "- No direct address, no 'subscribe', no rhetorical questions to the viewer.\n\n" +
+          "'game-changer', 'in a world where', 'icon', 'legendary', 'forever changed', 'set the stage', " +
+          "'paving the way', 'poised to', 'signaling', 'as the dust settled', 'loomed'. These are " +
+          "the tells of generated filler. If a phrase could appear in any story about any company, " +
+          "it does not belong in this one.\n" +
+          "- No direct address, no 'subscribe', no rhetorical questions other than the one that opens " +
+          "the story.\n\n" +
           "=== LENGTH ===\n" +
-          "Hit the word count you are given. Narration runs at about 150 words per minute, so falling " +
-          "short leaves dead air under the pictures. Most beats should be TWO sentences, not one.\n\n" +
+          "Hit the word count you are given. Coming in short leaves dead air under the pictures, and " +
+          "every part so far has come in UNDER. Most beats are TWO sentences; some are three. A beat " +
+          "of a single short sentence is a deliberate choice for emphasis, not the default.\n\n" +
           "=== FACTS: THE HARD RULE ===\n" +
           "You are given SOURCE MATERIAL. Every name, date, number, place and event in your script " +
           "must be supported by it. You are summarising sources, not recalling what you know.\n" +
@@ -1679,15 +1713,28 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "- No text, signage, logos, charts with labels, or written words in the scene.\n" +
           "- Each beat's visual must be VISIBLY DIFFERENT from its neighbours. Change the location, " +
           "the action or the scale; do not describe the same room twice in a row.\n\n" +
-          "=== SERIES ===\n" +
-          "A long subject is told across several parts, one video each. You may be writing part one " +
-          "or a later part.\n" +
+          "=== SERIES: SCOPE IS THE HARDEST PART ===\n" +
+          "A long subject is told across MANY parts, one video each. You are writing ONE of them.\n\n" +
+          "The commonest failure is racing through the whole story in one part. A part that goes from " +
+          "founding to acquisition to present day is a SUMMARY — it leaves nothing for part two and " +
+          "tells none of it properly. That is the single thing that makes this format feel cheap.\n\n" +
+          "So: cover a NARROW SLICE and go deep. Assume there will be six or more parts and you are " +
+          "writing only this one. For an eighteen-minute subject, one minute of narration is roughly " +
+          "one chapter — the founding, or one crisis, or one rivalry. Not the arc.\n" +
+          "Slow down inside that slice. Name the people. Say what the room was like, what the problem " +
+          "was, what they tried first and why it failed. Specifics are what make a story feel told " +
+          "rather than listed — and you have the space for them precisely because you are not racing " +
+          "to the end.\n" +
+          "If you find yourself writing 'and then years later', you have gone too far. Stop earlier " +
+          "and end on the hook.\n\n" +
           "- You are given what earlier parts already covered. Do NOT retell any of it. The viewer " +
           "has seen it.\n" +
           "- A later part opens by moving the story FORWARD, not by recapping. No 'last time', no " +
           "'as we saw'. Start where the previous part stopped, the way the next chapter of a book does.\n" +
-          "- Cover as much ground as fits the word count, and stop at a point that feels like a " +
-          "resting place rather than mid-thought. Leave the viewer wanting the next part.\n" +
+          "- Cover as much ground as fits the word count, then stop ON A HOOK, as described above. " +
+          "Not at a resting place — a resting place is where a viewer stops watching.\n" +
+          "- Choose where to stop for DRAMATIC effect, not tidiness. The best place to end a part is " +
+          "the moment a problem appears and before it is solved.\n" +
           "- Set `complete` to true ONLY when the subject is genuinely finished and a further part " +
           "would have nothing left to say. If in doubt, leave it false.\n\n" +
           "=== OUTPUT ===\n" +
@@ -1741,16 +1788,20 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "{{sourceText}}\n\n" +
           "=== TASK ===\n" +
           "Write a narrated documentary script on this topic.\n\n" +
+          "SCOPE: this is part {{part}} of a series that will run for many parts. Cover only the " +
+          "next NARROW SLICE of the story and tell it properly. Do not summarise the whole subject.\n\n" +
           "LENGTH: {{targetWords}} words of narration across about {{beatCount}} beats " +
           "(~{{targetSeconds}} seconds). Count as you write — coming in short leaves silence under " +
           "the pictures. Most beats should be TWO sentences.\n\n" +
           "Before writing, decide three things:\n" +
-          "1. The SCENE you open on — a person doing something concrete, or a number that sounds " +
-          "wrong. Not a summary of the topic.\n" +
-          "2. The TURN — what goes wrong, or what nobody expected.\n" +
-          "3. The LANDING — the closing line, which should close a loop the opening opened.\n\n" +
-          "Then write the beats so the story moves from 1 to 3. Do not list facts in chronological " +
-          "order unless that order is itself the story.\n\n" +
+          "1. The JUXTAPOSITION you open on — two facts from the source that sit badly together — " +
+          "and the question it raises.\n" +
+          "2. The TURN in the middle — what goes wrong, or what nobody saw coming.\n" +
+          "3. The HOOK you end on — the threat or question you introduce and deliberately leave " +
+          "unanswered, so the viewer needs the next part.\n\n" +
+          "Then write the beats so the story moves from 1 through 2 to 3. Do not list facts in " +
+          "chronological order unless that order is itself the story.\n\n" +
+          "Count your words before answering. Previous attempts came in 30% short.\n\n" +
           "Return ONLY the JSON object from your instructions.",
         createdAt: ISO,
       },
