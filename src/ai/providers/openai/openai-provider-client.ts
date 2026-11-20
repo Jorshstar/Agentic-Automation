@@ -42,6 +42,8 @@ export interface OpenAICompatibleOptions {
    * tokens. Raising the floor is what stops a stage silently producing nothing.
    */
   readonly minMaxTokens?: number;
+  /** Overrides the default request timeout; slow self-hosted endpoints need it. */
+  readonly timeoutMs?: number;
 }
 
 export class OpenAIProviderClient implements ProviderClient {
@@ -50,6 +52,7 @@ export class OpenAIProviderClient implements ProviderClient {
   private readonly baseUrl: string;
   private readonly defaultModel: string | undefined;
   private readonly minMaxTokens: number | undefined;
+  private readonly timeoutMs: number;
 
   constructor(options?: OpenAICompatibleOptions) {
     if (options) {
@@ -61,6 +64,7 @@ export class OpenAIProviderClient implements ProviderClient {
       this.baseUrl = options.baseUrl.replace(/\/+$/u, "");
       this.defaultModel = options.defaultModel;
       this.minMaxTokens = options.minMaxTokens;
+      this.timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
       return;
     }
 
@@ -79,6 +83,7 @@ export class OpenAIProviderClient implements ProviderClient {
     );
     this.defaultModel = undefined;
     this.minMaxTokens = undefined;
+    this.timeoutMs = REQUEST_TIMEOUT_MS;
   }
 
   async generate(request: ProviderRequest): Promise<ProviderResponse> {
@@ -98,7 +103,7 @@ export class OpenAIProviderClient implements ProviderClient {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
       throw mapOpenAITransportError(error);

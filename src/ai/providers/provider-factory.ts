@@ -31,6 +31,12 @@ export function createProviderClient(provider: ProviderName = "mock"): ProviderC
         // empty content because 27 tokens went to reasoning. This floor keeps
         // a small request from silently producing nothing.
         minMaxTokens: Number(process.env.LLM_MIN_MAX_TOKENS ?? 2000),
+        // A self-hosted endpoint is far slower than a hosted one: measured at
+        // 60-90s for a short prompt and 201s for a long one, which overran the
+        // default and failed a call that would have succeeded. Background
+        // stages can afford to wait; the interactive chat brain is the one that
+        // cannot, so it stays on a hosted provider instead.
+        timeoutMs: Number(process.env.LLM_TIMEOUT_MS ?? 420_000),
       });
     default:
       return new MockProviderClient();

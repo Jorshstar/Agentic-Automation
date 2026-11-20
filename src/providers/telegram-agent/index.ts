@@ -82,11 +82,14 @@ export class TelegramAgentProvider {
         },
         expectedOutput: { format: "json", description: "a chat reply and a build decision" },
         maxTokens: 700,
-        // The chat brain is text work, so it follows whichever text endpoint
-        // is configured. Without this it would use the prompt registry's
-        // preferred provider and fail on an unfunded account, which the brain
-        // swallows into its generic fallback reply.
-        ...textProviderOptions("TELEGRAM_AGENT_MODEL"),
+        // Chat stays on OPENAI even when a custom endpoint is configured,
+        // because this is the one INTERACTIVE stage. The self-hosted endpoint
+        // runs 60-90s on a short prompt and timed out at 201s once the system
+        // prompt grew to cover documentaries and clips — and a bot that takes
+        // three minutes to answer is unusable even when it succeeds. The call
+        // is ~700 tokens, so responsiveness costs fractions of a cent.
+        // Set TELEGRAM_AGENT_PROVIDER=local to override.
+        ...textProviderOptions("TELEGRAM_AGENT_MODEL", "TELEGRAM_AGENT_PROVIDER"),
       });
       return parseDecision(generated.output);
     } catch {
