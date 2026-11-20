@@ -442,11 +442,13 @@ function finalArgs(opts: {
     chains.push(
       `[${musicIdx}:a]volume=${ctx.musicVolume}[m];` +
       `[${voiceIdx}:a][m]amix=inputs=2:duration=first:normalize=0,` +
-      `loudnorm=I=-16:TP=-1.5,aresample=44100,alimiter=limit=0.95[a]`,
+      `loudnorm=I=${ctx.loudnessTargetLufs ?? -16}:TP=-1.5,aresample=44100,alimiter=limit=0.95[a]`,
     );
     audioMap = "[a]";
   } else if (voiceIdx >= 0) {
-    chains.push(`[${voiceIdx}:a]loudnorm=I=-16:TP=-1.5,aresample=44100,alimiter=limit=0.95[a]`);
+    chains.push(
+      `[${voiceIdx}:a]loudnorm=I=${ctx.loudnessTargetLufs ?? -16}:TP=-1.5,aresample=44100,alimiter=limit=0.95[a]`,
+    );
     audioMap = "[a]";
   }
 

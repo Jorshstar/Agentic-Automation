@@ -144,6 +144,20 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
       // held for exactly as long as its line takes to say. Raising this speeds
       // the WHOLE video uniformly rather than just the voice.
       speed: Number(process.env.LONGFORM_VOICE_SPEED ?? 1.12),
+      // "onyx" is the deep one. The studio default, "alloy", is light and
+      // neutral — fine for a short, thin for documentary narration, where the
+      // voice has to carry a minute on its own.
+      voice: process.env.LONGFORM_VOICE?.trim() || "onyx",
+      // gpt-4o-mini-tts takes delivery direction, which is the lever for
+      // "clearer": diction and placement are steerable even though pitch is
+      // fixed by the voice. Without this it reads the lines; with it, it
+      // performs them.
+      instructions:
+        process.env.LONGFORM_VOICE_STYLE?.trim() ||
+        "Speak as a documentary narrator: deep, resonant chest voice with warm low tone. " +
+          "Crisp, deliberate diction — every consonant lands. Confident and authoritative, " +
+          "never breathless or salesy. Measured pace with a slight lift into each new fact, " +
+          "and a firm downward close on the final sentence.",
     },
   });
 
@@ -195,6 +209,11 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
       outputPath: `${workDir}/part-${part}.mp4`,
       workDir: `${workDir}/compose`,
       kenBurns: true,
+      // No music bed, so the narration carries the whole track and should sit
+      // at full platform level. Composition normalises to -16 LUFS, which is
+      // the right target when a voice has to share room with music; alone it
+      // just sounds quiet. -14 is what YouTube and the rest normalise to.
+      loudnessTargetLufs: -14,
     },
   });
 

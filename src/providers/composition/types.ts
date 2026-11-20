@@ -25,6 +25,15 @@ export interface CompositionContext {
   readonly musicVolume: number;
   /** Apply the Ken-Burns pan to image clips. */
   readonly kenBurns: boolean;
+  /**
+   * Integrated loudness target in LUFS.
+   *
+   * -16 suits a narration-plus-music mix, where the voice has to leave room for
+   * the bed. A voice-only video normalised to -16 just sounds quiet next to
+   * everything else in a feed: YouTube, Spotify and the rest normalise around
+   * -14, so that is what a track carrying only narration should hit.
+   */
+  readonly loudnessTargetLufs?: number;
 }
 
 export interface CompositionRequest {
