@@ -35,6 +35,16 @@ export interface LongformScript {
   readonly title: string;
   readonly beats: readonly ScriptBeat[];
   readonly estimatedWords: number;
+  /**
+   * A few lines on what this part covered, for the next part's prompt.
+   *
+   * Written here rather than derived later because the writer already knows
+   * what it chose to include and what it deliberately left for later — that
+   * intent is lost once only the beats remain.
+   */
+  readonly summary: string;
+  /** True when the writer judges the subject finished. */
+  readonly complete: boolean;
 }
 
 const SYSTEM_PROMPT_ID = "longform-script.system";
@@ -54,6 +64,13 @@ export interface ScriptRequest {
    * becomes summary rather than recall.
    */
   readonly sourceText?: string;
+  /**
+   * What earlier parts of this series already covered, from
+   * `continuationBrief`. Empty for part one.
+   */
+  readonly previously?: string;
+  /** Which part this is. 1 unless continuing a series. */
+  readonly part?: number;
 }
 
 export class LongformScriptWriter {
@@ -82,6 +99,11 @@ export class LongformScriptWriter {
             ? request.sourceText
             : "(no sources were found — say only what you are certain of, and prefer vaguer " +
               "phrasing to an invented number)",
+        part: request.part ?? 1,
+        previously:
+          request.previously && request.previously.trim() !== ""
+            ? request.previously
+            : "(this is part one — nothing has been covered yet)",
       },
       expectedOutput: { format: "json", description: "a documentary script as beats" },
       maxTokens: 4000,
@@ -105,7 +127,7 @@ export function parseScript(output: unknown, topic: string): LongformScript {
     try {
       root = JSON.parse(cleaned);
     } catch {
-      return { title: topic, beats: [], estimatedWords: 0 };
+      return { title: topic, beats: [], estimatedWords: 0, summary: "", complete: false };
     }
   }
 
@@ -131,5 +153,9 @@ export function parseScript(output: unknown, topic: string): LongformScript {
     title,
     beats,
     estimatedWords: beats.reduce((sum, beat) => sum + beat.text.split(/\s+/u).length, 0),
+    summary: typeof record["summary"] === "string" ? record["summary"].trim() : "",
+    // Defaults to false: a series that stops early can always be continued by
+    // hand, but one that declares itself finished prematurely is just truncated.
+    complete: record["complete"] === true,
   };
 }

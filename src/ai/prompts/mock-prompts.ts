@@ -1679,10 +1679,26 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "- No text, signage, logos, charts with labels, or written words in the scene.\n" +
           "- Each beat's visual must be VISIBLY DIFFERENT from its neighbours. Change the location, " +
           "the action or the scale; do not describe the same room twice in a row.\n\n" +
+          "=== SERIES ===\n" +
+          "A long subject is told across several parts, one video each. You may be writing part one " +
+          "or a later part.\n" +
+          "- You are given what earlier parts already covered. Do NOT retell any of it. The viewer " +
+          "has seen it.\n" +
+          "- A later part opens by moving the story FORWARD, not by recapping. No 'last time', no " +
+          "'as we saw'. Start where the previous part stopped, the way the next chapter of a book does.\n" +
+          "- Cover as much ground as fits the word count, and stop at a point that feels like a " +
+          "resting place rather than mid-thought. Leave the viewer wanting the next part.\n" +
+          "- Set `complete` to true ONLY when the subject is genuinely finished and a further part " +
+          "would have nothing left to say. If in doubt, leave it false.\n\n" +
           "=== OUTPUT ===\n" +
           "Return ONLY valid JSON (no markdown fences):\n" +
-          "{ \"title\": string, \"beats\": [ { \"text\": string, \"visual\": string } ] }\n" +
-          "`text` is the exact words to be spoken. `visual` is the image to draw.",
+          "{ \"title\": string, \"beats\": [ { \"text\": string, \"visual\": string } ], " +
+          "\"summary\": string, \"complete\": boolean }\n" +
+          "`text` is the exact words to be spoken. `visual` is the image to draw.\n" +
+          "`summary` is two or three sentences on what THIS part covered and where it stopped — it is " +
+          "the only thing the next part will know about this one, so say what was covered and what " +
+          "you deliberately left for later.\n" +
+          "`title` should name this part specifically, not the whole subject.",
         createdAt: ISO,
       },
     ],
@@ -1702,14 +1718,24 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
       preferredProvider: "openai",
       preferredModel: "gpt-4o",
       temperature: 0.7,
-      requiredVariables: ["topic", "targetSeconds", "targetWords", "beatCount", "sourceText"],
+      requiredVariables: [
+        "topic",
+        "targetSeconds",
+        "targetWords",
+        "beatCount",
+        "sourceText",
+        "part",
+        "previously",
+      ],
     },
     versions: [
       {
         version: "v1",
         status: "stable",
         template:
-          "TOPIC: {{topic}}\n\n" +
+          "TOPIC: {{topic}}\n" +
+          "PART: {{part}}\n\n" +
+          "=== ALREADY COVERED ===\n{{previously}}\n\n" +
           "=== SOURCE MATERIAL ===\n" +
           "Build the script from this and nothing else. Facts not present here may not appear.\n\n" +
           "{{sourceText}}\n\n" +
