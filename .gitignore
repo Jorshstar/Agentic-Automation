@@ -35,3 +35,6 @@ Thumbs.db
 
 # Supervisor logs from scripts/studio-autostart.*
 logs/
+
+# Watch folder for drag-and-drop clipping
+input/

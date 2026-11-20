@@ -1,19 +1,41 @@
 import { join } from "node:path";
 import { createClipQueue } from "./clip-queue.js";
 import { runClipJob } from "./run-clip-job.js";
+import {
+  archive,
+  ensureWatchFolders,
+  scanWatchFolder,
+  StabilityTracker,
+  watchFolders,
+  WATCH_SEPARATOR,
+} from "./watch-folder.js";
+import type { WatchedFile } from "./watch-folder.js";
 import { TelegramClient } from "../telegram/telegram-client.js";
 import { logger } from "../lib/logger.js";
 
 /**
- * LOCAL CLIP WORKER — run this on your PC to process clip jobs.
+ * LOCAL CLIP WORKER — the machine that actually makes the clips.
  *
  *   npm run studio:clip-worker
  *
- * The cloud Telegram agent queues clip requests; this worker (on your home IP,
- * which YouTube trusts) drains the queue, downloads + clips the video, and
- * delivers to Telegram. Keep it running while you want clipping to work; jobs
- * queued while it's off are picked up when it starts. Needs yt-dlp on PATH (or
- * YT_DLP_PATH) plus the usual .env keys.
+ * It takes work from two places:
+ *
+ *   1. The QUEUE, filled by the Telegram agent when you ask it to clip a link.
+ *      That runs here rather than in the cloud because YouTube blocks cloud IPs,
+ *      and your home connection is trusted.
+ *
+ *   2. The WATCH FOLDER (`input/` by default). Drop a video in and it is
+ *      clipped. This exists because Telegram refuses to hand a bot any file over
+ *      20 MB — about three minutes of phone video — so the chat is not a usable
+ *      way to submit a long recording. The file is already on this machine, so
+ *      the shortest path is to read it from here.
+ *
+ *      Say what to clip in the file name, after " -- ":
+ *        PSG vs Barca -- the goals.mp4
+ *        podcast -- key insights, with subtitles.mp4
+ *
+ * Keep it running while you want clipping to work; anything queued while it is
+ * off is picked up when it starts. Needs ffmpeg on PATH plus the usual .env keys.
  */
 
 try {
@@ -27,54 +49,112 @@ const POLL_INTERVAL_MS = 5000;
 async function main(): Promise<void> {
   const queue = createClipQueue();
   const telegram = new TelegramClient();
+  const folders = watchFolders();
+  const tracker = new StabilityTracker();
+  await ensureWatchFolders(folders);
 
-  await telegram.send("🎬 Clip worker online — send me a video link to clip.");
+  await telegram.send(
+    `🎬 Clip worker online — send me a video link, or drop a file in \`${folders.inbox}\`.`,
+  );
   console.log("Clip worker running... (Ctrl+C to stop)");
+  console.log(`  watching: ${folders.inbox}  (name files "video ${WATCH_SEPARATOR.trim()} the goals.mp4")`);
 
   for (;;) {
-    let job;
+    let didWork = false;
+
+    // 1. Queued links first — someone is waiting in the chat for those.
     try {
-      job = await queue.dequeue();
+      const job = await queue.dequeue();
+      if (job) {
+        didWork = true;
+        console.log(`⇐ clip job: ${job.fileId ? "[upload]" : job.url} (theme: ${job.theme})`);
+        await process_(() => runClipJob(job, {
+          workDir: join("output", "clips", `local-${Date.now()}`),
+          onStep: (message) => {
+            console.log("  " + message);
+            void telegram.send(message);
+          },
+        }), telegram);
+      }
     } catch (error) {
       logger.error("clip queue read failed", { error: String(error) });
-      await sleep(POLL_INTERVAL_MS);
-      continue;
     }
 
-    if (!job) {
-      await sleep(POLL_INTERVAL_MS);
-      continue;
-    }
-
-    console.log(`⇐ clip job: ${job.url} (theme: ${job.theme})`);
-    const workDir = join("output", "clips", `local-${Date.now()}`);
+    // 2. Then anything dropped in the watch folder.
     try {
-      const result = await runClipJob(job, {
-        workDir,
+      for (const file of await scanWatchFolder(folders, tracker)) {
+        didWork = true;
+        await handleWatchedFile(file, folders, tracker, telegram);
+      }
+    } catch (error) {
+      logger.error("watch folder scan failed", { error: String(error) });
+    }
+
+    if (!didWork) await sleep(POLL_INTERVAL_MS);
+  }
+}
+
+async function handleWatchedFile(
+  file: WatchedFile,
+  folders: ReturnType<typeof watchFolders>,
+  tracker: StabilityTracker,
+  telegram: TelegramClient,
+): Promise<void> {
+  const megabytes = (file.bytes / 1_000_000).toFixed(0);
+  const theme = file.theme || "auto";
+  console.log(`📂 picked up "${file.name}" (${megabytes} MB, theme: ${theme})`);
+  await telegram.send(`📂 Found "${file.name}" (${megabytes} MB) — clipping ${file.theme || "the best bits"}…`);
+
+  let ok = false;
+  try {
+    const result = await runClipJob(
+      // The whole name-suffix is the user's own words, so the same phrasing that
+      // works in chat ("vertical", "with subtitles", "remove the watermark")
+      // works here too.
+      { url: file.path, theme, count: 5, reframe: file.theme, captions: file.theme, tighten: file.theme, removeOverlays: file.theme },
+      {
+        workDir: join("output", "clips", `watch-${Date.now()}`),
         onStep: (message) => {
           console.log("  " + message);
           void telegram.send(message);
         },
-      });
-      if (result.delivered > 0) {
-        // Show the scores so the user can tell a near-certain pick from a
-        // marginal one without opening every clip.
-        const scores = result.clips
-          .filter((clip) => clip.delivered)
-          .map((clip) => `${clip.score}`)
-          .join(", ");
-        await telegram.send(
-          `✅ Sent ${result.delivered} clip(s) from "${result.title.slice(0, 70)}" ` +
-            `(scores: ${scores}/100). Want more, or a different angle?`,
-        );
-      } else {
-        await telegram.send("❌ Couldn't produce clips from that one.");
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message.slice(0, 400) : String(error);
-      console.error("clip job failed:", message);
-      await telegram.send(`❌ Clip job failed:\n${message}`);
-    }
+      },
+    );
+    ok = result.delivered > 0;
+    await telegram.send(
+      ok
+        ? `✅ Sent ${result.delivered} clip(s) from "${file.name}".`
+        : `❌ Couldn't produce clips from "${file.name}".`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 400) : String(error);
+    console.error(`  failed: ${message}`);
+    await telegram.send(`❌ "${file.name}" failed:\n${message}`);
+  } finally {
+    // Always move it out of the inbox, success or not, so the worker cannot get
+    // stuck retrying the same broken file forever.
+    tracker.forget(file.path);
+    const moved = await archive(file, folders, ok).catch(() => undefined);
+    if (moved) console.log(`  → ${moved}`);
+  }
+}
+
+/** Run a queued job, reporting the outcome to the chat. */
+async function process_(
+  run: () => Promise<{ delivered: number; title: string }>,
+  telegram: TelegramClient,
+): Promise<void> {
+  try {
+    const result = await run();
+    await telegram.send(
+      result.delivered > 0
+        ? `✅ Sent ${result.delivered} clip(s) from "${result.title.slice(0, 70)}".`
+        : "❌ Couldn't produce clips from that one.",
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 400) : String(error);
+    console.error("clip job failed:", message);
+    await telegram.send(`❌ Clip job failed:\n${message}`);
   }
 }
 

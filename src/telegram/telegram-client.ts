@@ -1,4 +1,5 @@
-import { writeFile } from "node:fs/promises";
+import { writeFile, copyFile, mkdir, stat } from "node:fs/promises";
+import { dirname } from "node:path";
 import { withRetry } from "../lib/retry.js";
 import { ConfigurationError } from "../lib/errors.js";
 
@@ -42,6 +43,38 @@ export interface RawUpdate {
 
 /** Telegram's 20 MB ceiling for files a bot may download via getFile. */
 export const TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
+/**
+ * The ceiling when talking to a LOCAL Bot API server instead of Telegram's.
+ * Running telegram-bot-api yourself raises getFile to 2000 MB, which is the
+ * difference between "three minutes of phone video" and "a whole match".
+ */
+export const TELEGRAM_LOCAL_DOWNLOAD_LIMIT_BYTES = 2000 * 1024 * 1024;
+
+/**
+ * Base URL for the Bot API. Defaults to Telegram's own servers; point
+ * TELEGRAM_API_BASE at a local telegram-bot-api instance (e.g.
+ * http://localhost:8081) to lift the 20 MB download limit to 2 GB.
+ */
+export function telegramApiBase(): string {
+  return (process.env.TELEGRAM_API_BASE?.trim() || "https://api.telegram.org").replace(/\/+$/u, "");
+}
+
+/** Whether we are talking to a self-hosted Bot API server rather than Telegram. */
+export function usingLocalApiServer(): boolean {
+  return telegramApiBase() !== "https://api.telegram.org";
+}
+
+/** The download ceiling that actually applies right now. */
+export function downloadLimitBytes(): number {
+  return usingLocalApiServer()
+    ? TELEGRAM_LOCAL_DOWNLOAD_LIMIT_BYTES
+    : TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES;
+}
+
+/** Absolute on POSIX (/var/lib/...) or Windows (C:\\...). */
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(value);
+}
 
 export class TelegramClient {
   private readonly base: string;
@@ -56,8 +89,9 @@ export class TelegramClient {
     if (!token || !chatId) {
       throw new ConfigurationError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set to run the listener.");
     }
-    this.base = `https://api.telegram.org/bot${token}`;
-    this.fileBase = `https://api.telegram.org/file/bot${token}`;
+    const api = telegramApiBase();
+    this.base = `${api}/bot${token}`;
+    this.fileBase = `${api}/file/bot${token}`;
     this.ownerChatId = chatId;
   }
 
@@ -147,9 +181,13 @@ export class TelegramClient {
   }
 
   /**
-   * Download a Telegram file by file_id to `destPath`. Enforces the 20 MB bot
-   * limit up front (getFile reports the size) so oversize videos fail with a
-   * clear reason instead of a truncated file. Returns the byte count on success.
+   * Download a Telegram file by file_id to `destPath`. Enforces the applicable
+   * size limit up front (getFile reports the size) so an oversize video fails
+   * with a clear reason instead of a truncated file — 20 MB against Telegram's
+   * own servers, 2 GB against a local Bot API server. Returns the byte count.
+   *
+   * A local server also serves files from a path on disk rather than over HTTP,
+   * which is handled below.
    */
   async download(fileId: string, destPath: string): Promise<{ ok: true; bytes: number } | { ok: false; error: string }> {
     let filePath: string;
@@ -164,9 +202,33 @@ export class TelegramClient {
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
-    if (reportedSize !== undefined && reportedSize > TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES) {
-      return { ok: false, error: `file is ${(reportedSize / 1_048_576).toFixed(1)} MB — over the 20 MB bot limit` };
+    const limit = downloadLimitBytes();
+    if (reportedSize !== undefined && reportedSize > limit) {
+      const megabytes = (reportedSize / 1_048_576).toFixed(1);
+      const capMb = Math.round(limit / 1_048_576);
+      return {
+        ok: false,
+        error: usingLocalApiServer()
+          ? `file is ${megabytes} MB — over the ${capMb} MB limit of your local Bot API server`
+          : `file is ${megabytes} MB — over the ${capMb} MB bot limit. ` +
+            "Run a local Bot API server (see scripts/telegram-local-api) to raise this to 2 GB, " +
+            "or drop the file into the watch folder instead.",
+      };
     }
+    // A local Bot API server returns an ABSOLUTE PATH on disk instead of a
+    // relative one, because the file never leaves the machine. Copying it is far
+    // cheaper than fetching it back over HTTP from ourselves.
+    if (usingLocalApiServer() && isAbsolutePath(filePath)) {
+      try {
+        await mkdir(dirname(destPath), { recursive: true });
+        await copyFile(filePath, destPath);
+        const { size } = await stat(destPath);
+        return { ok: true, bytes: size };
+      } catch (error) {
+        return { ok: false, error: `local file copy failed: ${String(error).slice(0, 200)}` };
+      }
+    }
+
     try {
       const res = await fetch(`${this.fileBase}/${filePath}`, { signal: AbortSignal.timeout(120_000) });
       if (!res.ok) {

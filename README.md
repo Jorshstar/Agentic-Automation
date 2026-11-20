@@ -1020,13 +1020,54 @@ npx tsx src/demos/clip-run-demo.ts "https://youtu.be/XXXX" "emotional" 4 fit cle
 Or just tell the Telegram bot: *"clip the goals out of this"* with a link, or
 upload a video straight into the chat and say what you want from it.
 
-### Three ways in
+### Four ways in
 
 | Source | How | Limit |
 | ------ | --- | ----- |
-| **Link** | Anything yt-dlp handles (YouTube, Vimeo, direct MP4 URLs) | Runs on the local worker — YouTube blocks cloud IPs |
+| **Link** | Anything yt-dlp handles — 1755 sites | Runs on the local worker; YouTube blocks cloud IPs |
 | **Local file** | Pass a path instead of a URL | None |
-| **Telegram upload** | Send the video to the bot | **20 MB** — the Bot API's own ceiling on `getFile` |
+| **Watch folder** | Drop a video into `input/` | None |
+| **Telegram upload** | Send the video to the bot | **20 MB** — raise to 2 GB with a local Bot API server |
+
+### The watch folder
+
+The simplest way to clip something big. Drop a file into `input/` and the
+running clip worker picks it up, with no command to type and no size limit.
+
+Say what you want in the FILE NAME, after ` -- `:
+
+```
+input/PSG vs Barca -- the goals.mp4
+input/podcast -- key insights, with subtitles.mp4
+input/interview -- emotional moments, vertical.mov
+input/stream.mp4                                     (no theme: the best bits)
+```
+
+Everything after the separator is read as your own words, so the same phrasing
+that works in chat works here — `vertical`, `with subtitles`, `cut the pauses`,
+`remove the watermark`.
+
+The worker waits for a file to stop growing before touching it, so you can copy
+a 2 GB video in and it will not be clipped half-written. Finished files move to
+`input/done/`, failures to `input/failed/` — a broken file is never retried
+forever, and nothing is ever overwritten.
+
+### Telegram uploads over 20 MB
+
+Telegram's Bot API refuses to give a bot any file over **20 MB** — about three
+minutes of phone video. That is a limit on Telegram's side, not ours.
+
+To lift it to **2 GB**, run Telegram's own Bot API server locally and point the
+studio at it with one environment variable:
+
+```
+TELEGRAM_API_BASE=http://localhost:8081
+```
+
+Full instructions, including the `logOut` step people usually miss, are in
+[`scripts/telegram-local-api.md`](scripts/telegram-local-api.md).
+
+If the file is already on the machine, the watch folder needs none of this.
 
 ### The theme decides everything
 

@@ -133,7 +133,11 @@ export async function runClipJob(
   },
 ): Promise<ClipJobResult> {
   const log = opts.onStep ?? (() => {});
-  const plan = planForTheme(job.theme);
+  // The theme and the extras arrive as one sentence ("the funniest moments,
+  // remove the watermark") from chat and from watch-folder file names. The
+  // extras still steer rendering, but they must not reach the selector's prompt
+  // as part of WHAT to clip — "remove the watermark" is not a kind of moment.
+  const plan = planForTheme(stripExtras(job.theme));
   const count = Math.min(Math.max(job.count || 5, 1), MAX_CLIPS);
 
   // Everything that ADDS to or CHANGES the clip is opt-in. A clip nobody asked
@@ -493,6 +497,29 @@ function formatTimestamp(seconds: number): string {
  * "remove the caption" must NOT match — that is about the SOURCE's own burned-in
  * text, and is handled by wantsOverlaysGone.
  */
+/**
+ * Remove rendering instructions from a theme, leaving only the subject.
+ *
+ *   "the funniest moments, remove the watermark"  ->  "the funniest moments"
+ *   "key insights, vertical, with subtitles"      ->  "key insights"
+ *
+ * Returns the original text when stripping would leave nothing, because a
+ * request that is ONLY an instruction ("remove the watermark") still has to
+ * select something.
+ */
+export function stripExtras(theme: string): string {
+  const EXTRA_PHRASES =
+    /\b((remove|delete|erase|take off|get rid of|hide|without|no)\b[^,.]{0,30}\b(caption|captions|title|titles|text|watermark|overlay|logo|banner|subtitle|subtitles|writing)|(add|with|put|include|burn)\b[^,.]{0,20}\b(caption|captions|subtitle|subtitles|subs?)|tighten(ed)?( it)?( up)?|cut (the )?(dead ?air|pauses|silence)|remove (the )?(dead ?air|pauses|silence)|make it (vertical|portrait|full ?screen)|vertical|portrait|full ?screen|like ?tik ?tok|original size|same size|as.?is)\b/giu;
+
+  const cleaned = theme
+    .replace(EXTRA_PHRASES, "")
+    .replace(/\s*,\s*,+/gu, ",")
+    .replace(/^[\s,.-]+|[\s,.-]+$/gu, "")
+    .replace(/\s{2,}/gu, " ")
+    .trim();
+  return cleaned === "" ? theme.trim() : cleaned;
+}
+
 export function wantsCaptions(text: string): boolean {
   if (wantsOverlaysGone(text)) return false;
   return /\b(add|with|put|include|burn|want|need|give me)\b[^.]{0,20}\b(caption|captions|subtitle|subtitles|sub|subs|text)\b/iu.test(

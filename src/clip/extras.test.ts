@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { wantsCaptions, wantsTightening, wantsOverlaysGone } from "./run-clip-job.js";
+import { wantsCaptions, wantsTightening, wantsOverlaysGone, stripExtras } from "./run-clip-job.js";
 
 /**
  * Nothing is added to a clip unless the user asked for it. These guard that
@@ -58,5 +58,32 @@ describe("wantsTightening", () => {
     for (const text of ["tighten it up", "cut the pauses", "remove the dead air", "make it snappy"]) {
       expect(wantsTightening(text)).toBe(true);
     }
+  });
+});
+
+
+describe("stripExtras", () => {
+  it("leaves the subject and drops the instructions", () => {
+    expect(stripExtras("the funniest moments, remove the watermark")).toBe("the funniest moments");
+    expect(stripExtras("key insights, with subtitles")).toBe("key insights");
+    expect(stripExtras("the goals, vertical")).toBe("the goals");
+    expect(stripExtras("the goals, make it vertical, cut the pauses")).toBe("the goals");
+  });
+
+  it("leaves an ordinary theme untouched", () => {
+    for (const theme of ["the goals", "funniest moments", "emotional moments", "auto"]) {
+      expect(stripExtras(theme)).toBe(theme);
+    }
+  });
+
+  it("keeps the text when it is ONLY an instruction", () => {
+    // Something still has to be selected, so returning "" would be worse.
+    expect(stripExtras("remove the watermark")).toBe("remove the watermark");
+  });
+
+  it("does not change which extras fire", () => {
+    const full = "the funniest moments, remove the watermark";
+    expect(wantsOverlaysGone(full)).toBe(true);
+    expect(stripExtras(full)).toBe("the funniest moments");
   });
 });
