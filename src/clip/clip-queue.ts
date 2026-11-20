@@ -13,15 +13,43 @@ import type { ClipJob } from "./run-clip-job.js";
 
 const QUEUE_KEY = "content-studio:clip-queue";
 
-export interface QueuedClipJob extends ClipJob {
+/**
+ * A documentary job: make the next part of a narrated series.
+ *
+ * It shares the clip queue rather than having one of its own because both are
+ * work the LOCAL machine must do — clips because YouTube blocks cloud IPs,
+ * documentaries because they need ffmpeg — and one queue means one place for a
+ * job to be stuck and one worker to keep running.
+ */
+export interface DocumentaryJob {
+  readonly kind: "documentary";
+  /**
+   * The subject. Empty means "continue whichever series was worked on most
+   * recently", which is what "do part 3" means when nothing else is said.
+   */
+  readonly topic: string;
+  readonly targetSeconds?: number;
+}
+
+/** Clip jobs predate the `kind` field, so an absent kind means a clip. */
+export type StudioJob = (ClipJob & { readonly kind?: "clip" }) | DocumentaryJob;
+
+export type QueuedJob = StudioJob & {
   /** When it was enqueued (epoch ms). */
   readonly enqueuedAt: number;
+};
+
+/** Backwards-compatible alias for callers that only deal in clips. */
+export type QueuedClipJob = ClipJob & { readonly enqueuedAt: number };
+
+export function isDocumentaryJob(job: StudioJob): job is DocumentaryJob {
+  return (job as DocumentaryJob).kind === "documentary";
 }
 
 export interface ClipQueue {
-  enqueue(job: ClipJob): Promise<boolean>;
+  enqueue(job: StudioJob): Promise<boolean>;
   /** Pop the oldest job, or undefined if the queue is empty. */
-  dequeue(): Promise<QueuedClipJob | undefined>;
+  dequeue(): Promise<QueuedJob | undefined>;
   size(): Promise<number>;
 }
 
@@ -33,7 +61,7 @@ export function createClipQueue(): ClipQueue {
       async enqueue() {
         return false;
       },
-      async dequeue() {
+      async dequeue(): Promise<QueuedJob | undefined> {
         return undefined;
       },
       async size() {
@@ -50,18 +78,18 @@ class UpstashClipQueue implements ClipQueue {
     private readonly token: string,
   ) {}
 
-  async enqueue(job: ClipJob): Promise<boolean> {
-    const payload: QueuedClipJob = { ...job, enqueuedAt: Date.now() };
+  async enqueue(job: StudioJob): Promise<boolean> {
+    const payload: QueuedJob = { ...job, enqueuedAt: Date.now() };
     // LPUSH + (worker) RPOP = FIFO.
     await this.command(["LPUSH", QUEUE_KEY, JSON.stringify(payload)]);
     return true;
   }
 
-  async dequeue(): Promise<QueuedClipJob | undefined> {
+  async dequeue(): Promise<QueuedJob | undefined> {
     const result = await this.command(["RPOP", QUEUE_KEY]);
     if (typeof result !== "string") return undefined;
     try {
-      return JSON.parse(result) as QueuedClipJob;
+      return JSON.parse(result) as QueuedJob;
     } catch {
       return undefined;
     }

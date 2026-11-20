@@ -117,6 +117,24 @@ async function handleUpdate(
     return true;
   }
 
+  if (decision.action === "documentary") {
+    // Runs on the local worker: it needs ffmpeg, and it shares the clip queue
+    // so there is a single place for work to be stuck and one worker to keep
+    // running. An empty topic means "continue the series already in progress".
+    const queue = createClipQueue();
+    const queued = await queue.enqueue({
+      kind: "documentary",
+      topic: decision.documentaryTopic,
+    });
+    await store.setSession(update.chatId, session);
+    await telegram.send(
+      queued
+        ? `${decision.reply}\n\n(Queued for your studio machine — it takes a few minutes.)`
+        : `${decision.reply}\n\n⚠️ The job queue isn't configured (needs Upstash Redis).`,
+    );
+    return true;
+  }
+
   if (decision.action === "clip") {
     // A clip job needs a source: either a link the user shared, or the most
     // recent video they uploaded into the chat. With neither, this is still a

@@ -1437,8 +1437,23 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "own words through — do not flatten them to a generic label. Use \"auto\" only when they " +
           "genuinely did not say. If they shared or uploaded a video but haven't said what they want " +
           "from it, stay in \"chat\" and ask.\n\n" +
+          "DOCUMENTARY SERIES: you can also make narrated documentary videos, told as a SERIES of " +
+          "parts — one video at a time, continuing where the last one stopped.\n" +
+          "Set action to \"documentary\" when the user asks for one:\n" +
+          "- Starting a new one: 'make a documentary about the history of Instagram', 'tell me the " +
+          "story of Nokia'. Put the subject in `documentaryTopic`.\n" +
+          "- Continuing one: 'do part 3', 'next part', 'continue', 'part 2 please'. Leave " +
+          "`documentaryTopic` EMPTY — the system continues whichever series is in progress. Do NOT " +
+          "guess a subject; an empty value means 'carry on', while a wrong one starts a different " +
+          "series.\n" +
+          "- Continuing a NAMED one when several exist: 'next part of the Instagram one' — put just " +
+          "the subject in `documentaryTopic`.\n" +
+          "Each part takes a few minutes and arrives as a video. Do not promise a specific length or " +
+          "number of parts; the series continues until the subject is finished.\n" +
+          "A documentary is NOT a clip (clipping cuts up an existing video) and NOT a build (which " +
+          "makes one short from a brief).\n\n" +
           "OUTPUT: Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY:\n" +
-          "{ \"reply\": string, \"action\": \"chat\" | \"build\" | \"clip\", \"brief\": string, " +
+          "{ \"reply\": string, \"action\": \"chat\" | \"build\" | \"clip\" | \"documentary\", \"brief\": string, " +
           "\"useAssets\": boolean, \"url\": string, \"theme\": string, \"count\": number, \"layout\": string }\n" +
           "When action is \"chat\", `brief` and `url` must be \"\". Only set `url` for a \"clip\" action.",
         createdAt: ISO,

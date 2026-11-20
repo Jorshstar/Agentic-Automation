@@ -18,8 +18,11 @@ const USER_PROMPT_ID = "telegram-agent.user";
 export interface AgentDecision {
   /** The message to send back to the user. */
   readonly reply: string;
-  /** "chat" = keep talking; "build" = generate a video; "clip" = clip a shared link. */
-  readonly action: "chat" | "build" | "clip";
+  /**
+   * "chat" = keep talking; "build" = generate a short video; "clip" = clip a
+   * shared link; "documentary" = make the next part of a narrated series.
+   */
+  readonly action: "chat" | "build" | "clip" | "documentary";
   /** A complete, self-contained brief for the video (only when action = "build"). */
   readonly brief: string;
   /** Whether to use the user's attached photos/videos in the build. */
@@ -45,6 +48,15 @@ export interface AgentDecision {
    * for none of it, which is the normal case: the clip comes back as footage.
    */
   readonly extras: string;
+  /**
+   * The documentary subject (action = "documentary").
+   *
+   * EMPTY is meaningful: it means continue the series already in progress,
+   * which is what "do part 3" means when the subject was established earlier in
+   * the conversation. Making the user retype a topic they already gave would be
+   * worse than picking up the most recent series.
+   */
+  readonly documentaryTopic: string;
 }
 
 export class TelegramAgentProvider {
@@ -91,6 +103,7 @@ export class TelegramAgentProvider {
         count: 5,
         layout: "",
         extras: "",
+        documentaryTopic: "",
       };
     }
   }
@@ -120,7 +133,14 @@ function parseDecision(output: unknown): AgentDecision {
     ? root["reply"].trim()
     : "Tell me a bit more about what you'd like to create.";
   const rawAction = root["action"];
-  const action: AgentDecision["action"] = rawAction === "build" ? "build" : rawAction === "clip" ? "clip" : "chat";
+  const action: AgentDecision["action"] =
+    rawAction === "build"
+      ? "build"
+      : rawAction === "clip"
+        ? "clip"
+        : rawAction === "documentary"
+          ? "documentary"
+          : "chat";
   const brief = typeof root["brief"] === "string" ? root["brief"].trim() : "";
   const useAssets = root["useAssets"] === true;
   const url = typeof root["url"] === "string" ? root["url"].trim() : "";
@@ -130,15 +150,17 @@ function parseDecision(output: unknown): AgentDecision {
     : 5;
   const layout = typeof root["layout"] === "string" ? root["layout"].trim().slice(0, 80) : "";
   const extras = typeof root["extras"] === "string" ? root["extras"].trim().slice(0, 120) : "";
+  const documentaryTopic =
+    typeof root["documentaryTopic"] === "string" ? root["documentaryTopic"].trim().slice(0, 160) : "";
 
   // Guards: never act without what the action needs.
   if (action === "build" && brief === "") {
-    return { reply, action: "chat", brief: "", useAssets, url: "", theme, count, layout, extras };
+    return { reply, action: "chat", brief: "", useAssets, url: "", theme, count, layout, extras, documentaryTopic };
   }
   // NOTE: a "clip" with an empty url is NOT downgraded here. The user may have
   // uploaded the video into the chat instead of sharing a link, and only the
   // caller knows whether an upload is attached. The caller does that check.
-  return { reply, action, brief, useAssets, url, theme, count, layout, extras };
+  return { reply, action, brief, useAssets, url, theme, count, layout, extras, documentaryTopic };
 }
 
 /**

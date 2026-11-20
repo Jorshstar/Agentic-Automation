@@ -1,5 +1,9 @@
 import { join } from "node:path";
-import { createClipQueue } from "./clip-queue.js";
+import { createClipQueue, isDocumentaryJob } from "./clip-queue.js";
+import type { DocumentaryJob } from "./clip-queue.js";
+import { runPart } from "../longform/run-part.js";
+import { createSeriesStore } from "../longform/series.js";
+import { TelegramDeliveryProvider } from "../providers/delivery/index.js";
 import { runClipJob } from "./run-clip-job.js";
 import {
   archive,
@@ -67,14 +71,25 @@ async function main(): Promise<void> {
       const job = await queue.dequeue();
       if (job) {
         didWork = true;
-        console.log(`⇐ clip job: ${job.fileId ? "[upload]" : job.url} (theme: ${job.theme})`);
-        await process_(() => runClipJob(job, {
-          workDir: join("output", "clips", `local-${Date.now()}`),
-          onStep: (message) => {
-            console.log("  " + message);
-            void telegram.send(message);
-          },
-        }), telegram);
+        const report = (message: string): void => {
+          console.log("  " + message);
+          void telegram.send(message);
+        };
+
+        if (isDocumentaryJob(job)) {
+          console.log(`⇐ documentary: ${job.topic || "[continue latest series]"}`);
+          await handleDocumentary(job, telegram, report);
+        } else {
+          console.log(`⇐ clip job: ${job.fileId ? "[upload]" : job.url} (theme: ${job.theme})`);
+          await process_(
+            () =>
+              runClipJob(job, {
+                workDir: join("output", "clips", `local-${Date.now()}`),
+                onStep: report,
+              }),
+            telegram,
+          );
+        }
       }
     } catch (error) {
       logger.error("clip queue read failed", { error: String(error) });
@@ -137,6 +152,72 @@ async function handleWatchedFile(
     const moved = await archive(file, folders, ok).catch(() => undefined);
     if (moved) console.log(`  → ${moved}`);
   }
+}
+
+/**
+ * Make the next part of a documentary series, and deliver it.
+ *
+ * An empty topic means "continue whatever I was last working on", which is what
+ * "do part 3" means in a chat where the subject was established earlier. The
+ * most recently worked series is the only sensible reading, and it is far
+ * better than refusing and asking the user to retype a topic they already gave.
+ */
+async function handleDocumentary(
+  job: DocumentaryJob,
+  telegram: TelegramClient,
+  report: (message: string) => void,
+): Promise<void> {
+  try {
+    const topic = job.topic.trim() || (await mostRecentSeriesTopic());
+    if (!topic) {
+      await telegram.send(
+        "❓ I don't have a series in progress. Tell me the subject — " +
+          'for example "make a documentary about the history of Instagram".',
+      );
+      return;
+    }
+
+    const result = await runPart({
+      topic,
+      targetSeconds: job.targetSeconds ?? 55,
+      onStep: report,
+    });
+
+    const delivered = await new TelegramDeliveryProvider().deliver({
+      videoPath: result.videoPath,
+      caption:
+        `📺 Part ${result.part} — ${result.title}\n\n` +
+        `${Math.round(result.durationSeconds)}s · ${result.beats} beats · ` +
+        `$${result.imagesCostUsd.toFixed(2)}\n` +
+        `Sources: ${result.citations.slice(0, 2).join(", ")}`,
+      documents: [],
+    });
+
+    await telegram.send(
+      result.complete
+        ? `✅ That completes "${topic}".`
+        : delivered.videoSent
+          ? `✅ Part ${result.part} sent. Say "part ${result.part + 1}" when you want the next one.`
+          : `⚠️ Part ${result.part} rendered but could not be delivered.`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 400) : String(error);
+    console.error("documentary failed:", message);
+    await telegram.send(`❌ Documentary failed:\n${message}`);
+  }
+}
+
+/** The series worked on most recently, by its newest part's timestamp. */
+async function mostRecentSeriesTopic(): Promise<string> {
+  const all = await createSeriesStore().list();
+  const open = all
+    .filter((record) => !record.complete && record.parts.length > 0)
+    .sort((a, b) => {
+      const left = a.parts.at(-1)?.createdAt ?? "";
+      const right = b.parts.at(-1)?.createdAt ?? "";
+      return right.localeCompare(left);
+    });
+  return open[0]?.topic ?? "";
 }
 
 /** Run a queued job, reporting the outcome to the chat. */
