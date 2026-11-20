@@ -1601,6 +1601,99 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
       },
     ],
   },
+  {
+    metadata: {
+      id: "longform-script.system",
+      name: "Long-form Documentary Script System Prompt",
+      description: "Voice, structure and factual rules for a narrated documentary built from illustrated beats.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["longform", "system"],
+      outputFormat: "json",
+      preferredProvider: "openai",
+      preferredModel: "gpt-4o",
+      temperature: 0.7,
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You write narrated documentary scripts that are illustrated beat by beat. Think of the " +
+          "voice of a well-researched explainer channel: dry, specific, a little wry, never breathless.\n\n" +
+          "=== THE VOICE ===\n" +
+          "- Concrete over abstract. Dates, numbers, names, places. 'In 1994' beats 'in the early nineties'.\n" +
+          "- Short declarative sentences. One idea each. Read it aloud in your head; if you run out of " +
+          "breath, cut it.\n" +
+          "- Open with a reversal or a surprise, and make the stakes clear inside two sentences.\n" +
+          "- Dry humour is welcome; jokes are not. Understatement, not punchlines.\n" +
+          "- NEVER use: 'imagine', 'little did they know', 'the rest is history', 'revolutionary', " +
+          "'game-changer', 'in a world where'. These are the tells of generated filler.\n" +
+          "- No direct address, no 'subscribe', no rhetorical questions to the viewer.\n\n" +
+          "=== FACTS ===\n" +
+          "Every claim must be one you are CONFIDENT is true. This format lives on being right. If you " +
+          "are unsure of a number or a date, write around it rather than inventing one — 'a few years " +
+          "later' is honest, a wrong year is not. Do not invent quotes. Do not attribute opinions to " +
+          "named people.\n\n" +
+          "=== BEATS ===\n" +
+          "The script is a list of BEATS. Each beat is one or two spoken sentences plus the single " +
+          "image drawn while they are spoken.\n\n" +
+          "The `visual` is the hard part, so follow these exactly:\n" +
+          "- Describe ACTION AND SETTING ONLY. What is happening, where, with what objects.\n" +
+          "- Describe people by ROLE and POSTURE, never by appearance: 'a man in a shirt and tie " +
+          "leaning over a desk', never 'a young balding man' or 'an older woman'. Age, hair, race and " +
+          "build must NEVER appear — the art style draws anonymous figures, and any appearance detail " +
+          "breaks it.\n" +
+          "- It must be a single still moment that can actually be drawn. Not a montage, not a " +
+          "sequence, not an abstract idea. 'A warehouse stretching into the distance with workers " +
+          "pushing carts' can be drawn; 'the company grows rapidly' cannot.\n" +
+          "- No text, signage, logos, charts with labels, or written words in the scene.\n" +
+          "- Each beat's visual must be VISIBLY DIFFERENT from its neighbours. Change the location, " +
+          "the action or the scale; do not describe the same room twice in a row.\n\n" +
+          "=== OUTPUT ===\n" +
+          "Return ONLY valid JSON (no markdown fences):\n" +
+          "{ \"title\": string, \"beats\": [ { \"text\": string, \"visual\": string } ] }\n" +
+          "`text` is the exact words to be spoken. `visual` is the image to draw.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
+      id: "longform-script.user",
+      name: "Long-form Documentary Script User Prompt",
+      description: "Feeds the topic and target length to the documentary script writer.",
+      owner: "content-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["longform", "user"],
+      outputFormat: "json",
+      preferredProvider: "openai",
+      preferredModel: "gpt-4o",
+      temperature: 0.7,
+      requiredVariables: ["topic", "targetSeconds", "targetWords", "beatCount"],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "TOPIC: {{topic}}\n\n" +
+          "Write a narrated documentary script on this topic.\n" +
+          "Target length: about {{targetSeconds}} seconds of narration, roughly {{targetWords}} words.\n" +
+          "Write about {{beatCount}} beats — each one or two sentences, with its own image.\n\n" +
+          "The opening beat must hook with a specific, surprising fact rather than a summary.\n" +
+          "The closing beat must land the point, not trail off.\n\n" +
+          "Return ONLY the JSON object from your instructions.",
+        createdAt: ISO,
+      },
+    ],
+  },
 ];
 
 /** Build a PromptManager seeded with the mock prompts (all in memory). */
