@@ -27,15 +27,63 @@ import type {
 const OPENAI_IMAGES_URL = "https://api.openai.com/v1/images/generations";
 const PER_IMAGE_TIMEOUT_MS = 120_000;
 
-/** Defaults: gpt-image-1 portrait (1024x1536 ≈ 2:3, good base for a 9:16 short). */
+/**
+ * Image model defaults.
+ *
+ * The model is READ FROM THE ENVIRONMENT because OpenAI retires image models
+ * and the previous default, "gpt-image-1", was retired — along with the
+ * "dall-e-3" fallback. Every image call in the studio had been returning HTTP
+ * 400 "model does not exist", and because a failed image is handled as a
+ * warning rather than an error (correct for ONE bad image) a completely dead
+ * model looked like a run with warnings. A retirement should be an env change,
+ * not a code change.
+ *
+ * Quality defaults to "low" on purpose. For flat cartoon line art it is visually
+ * indistinguishable from the default tier — detail tiers matter for photorealism,
+ * not for ink outlines — and it is roughly EIGHT TIMES cheaper. Measured on
+ * gpt-image-2.6-flare at 1536x1024: 5,488 output tokens at the default vs 664 at
+ * "low", which at $30/1M output tokens is $0.165 vs $0.020 per image.
+ */
 const DEFAULT_IMAGE_CONTEXT: ImageGenerationContext = {
-  model: "gpt-image-1",
-  size: "1024x1536",
-  quality: "medium",
+  model: process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-2.6-flare",
+  size: process.env.OPENAI_IMAGE_SIZE?.trim() || "1024x1536",
+  quality: process.env.OPENAI_IMAGE_QUALITY?.trim() || "low",
   format: "png",
   styleSuffix: "Vertical 9:16 composition, cinematic, no text or letters in the image.",
   outputDir: "output/assets/images",
 };
+
+/**
+ * Check the configured model exists before a run spends anything.
+ *
+ * This is the lesson from the retirement above: the failure was invisible
+ * because it arrived one warning at a time. Asking once, up front, turns "every
+ * image silently failed" into one clear message.
+ */
+export async function assertImageModelAvailable(model?: string): Promise<void> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new ConfigurationError("OPENAI_API_KEY is not set.");
+  }
+  const wanted = model ?? DEFAULT_IMAGE_CONTEXT.model;
+  const response = await fetch("https://api.openai.com/v1/models", {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) return; // cannot check — let the real call report the problem
+
+  const payload = (await response.json()) as { data?: { id?: string }[] };
+  const available = (payload.data ?? []).map((entry) => entry.id ?? "");
+  if (available.includes(wanted)) return;
+
+  const alternatives = available.filter((id) => /^gpt-image/u.test(id)).sort();
+  throw new ConfigurationError(
+    `Image model "${wanted}" is not available on this account. ` +
+      (alternatives.length > 0
+        ? `Available: ${alternatives.join(", ")}. Set OPENAI_IMAGE_MODEL to one of them.`
+        : "No gpt-image models are available on this account."),
+  );
+}
 
 export class OpenAIImageGenerationProvider implements ImageGenerationProvider {
   readonly name = "openai-image-generation-provider";

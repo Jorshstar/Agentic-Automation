@@ -49,6 +49,7 @@
     "clip:probe": "tsx src/demos/clip-probe-demo.ts",
     "clip:layouts": "tsx src/demos/clip-render-demo.ts",
     "clip:reframe": "tsx src/demos/clip-reframe-demo.ts",
+    "longform:style": "tsx src/demos/longform-style-demo.ts",
     "clip:check": "tsx src/demos/openai-check-demo.ts",
     "studio:dashboard": "tsx src/dashboard/server.ts",
     "studio:command": "tsx src/telegram/command-once.ts",
