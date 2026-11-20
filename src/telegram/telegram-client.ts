@@ -1,5 +1,6 @@
 import { writeFile, copyFile, mkdir, stat } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
 import { withRetry } from "../lib/retry.js";
 import { ConfigurationError } from "../lib/errors.js";
 
@@ -74,6 +75,34 @@ export function downloadLimitBytes(): number {
 /** Absolute on POSIX (/var/lib/...) or Windows (C:\\...). */
 function isAbsolutePath(value: string): boolean {
   return value.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(value);
+}
+
+/**
+ * Translate a path the Bot API server reported into one this process can open.
+ *
+ * Set TELEGRAM_LOCAL_FILES_MAP to "<container path>=<host path>" when the
+ * server's data volume is bind-mounted, e.g.
+ *   TELEGRAM_LOCAL_FILES_MAP=/var/lib/telegram-bot-api=C:\\telegram-bot-api
+ *
+ * Returns undefined when no mapping applies and the path is not local, so the
+ * caller downloads over HTTP instead.
+ */
+export function mapLocalFilePath(reported: string): string | undefined {
+  const mapping = process.env.TELEGRAM_LOCAL_FILES_MAP?.trim();
+  if (mapping) {
+    const separator = mapping.indexOf("=");
+    if (separator > 0) {
+      const from = mapping.slice(0, separator).trim().replace(/[\\/]+$/u, "");
+      const to = mapping.slice(separator + 1).trim().replace(/[\\/]+$/u, "");
+      if (from !== "" && to !== "" && reported.startsWith(from)) {
+        const rest = reported.slice(from.length).replace(/^[\\/]+/u, "");
+        return join(to, rest);
+      }
+    }
+  }
+  // No mapping: only usable if the server shares this filesystem (server and
+  // worker on the same host, not in a container).
+  return existsSync(reported) ? reported : undefined;
 }
 
 export class TelegramClient {
@@ -215,17 +244,28 @@ export class TelegramClient {
             "or drop the file into the watch folder instead.",
       };
     }
-    // A local Bot API server returns an ABSOLUTE PATH on disk instead of a
-    // relative one, because the file never leaves the machine. Copying it is far
-    // cheaper than fetching it back over HTTP from ourselves.
+    // A local Bot API server returns an ABSOLUTE PATH on disk rather than a URL
+    // path, because the file never left the machine. Copying it beats fetching
+    // it back over HTTP from ourselves — but only when this process can actually
+    // see that path.
+    //
+    // It often cannot. The usual setup runs the server in Docker, so the path is
+    // inside the CONTAINER (/var/lib/telegram-bot-api/...) while the worker runs
+    // on the Windows host. TELEGRAM_LOCAL_FILES_MAP translates it when the
+    // volume is bind-mounted; otherwise we fall through to the HTTP download,
+    // which the local server also serves. A silent failure here would look like
+    // the bot ignoring large videos.
     if (usingLocalApiServer() && isAbsolutePath(filePath)) {
-      try {
-        await mkdir(dirname(destPath), { recursive: true });
-        await copyFile(filePath, destPath);
-        const { size } = await stat(destPath);
-        return { ok: true, bytes: size };
-      } catch (error) {
-        return { ok: false, error: `local file copy failed: ${String(error).slice(0, 200)}` };
+      const localPath = mapLocalFilePath(filePath);
+      if (localPath) {
+        try {
+          await mkdir(dirname(destPath), { recursive: true });
+          await copyFile(localPath, destPath);
+          const { size } = await stat(destPath);
+          return { ok: true, bytes: size };
+        } catch {
+          // Unreadable from here — fall through to HTTP rather than give up.
+        }
       }
     }
 

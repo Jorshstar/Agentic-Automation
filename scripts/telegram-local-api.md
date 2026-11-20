@@ -20,7 +20,25 @@ These identify the *application*, not your bot, and are separate from
 
 Treat them like any other secret: they belong in `.env`, never in a commit.
 
-## 2. Run the server
+## 2. Run the setup script
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-telegram-local-api.ps1
+```
+
+It reads the credentials from `.env`, logs the bot out of Telegram's cloud,
+starts the container with its data bind-mounted, waits for the server to answer,
+and prints the two lines to add to `.env`.
+
+Undo at any time:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-telegram-local-api.ps1 -Revert
+```
+
+### What it does, if you would rather do it by hand
+
+
 
 Docker is the least painful option:
 
@@ -43,10 +61,18 @@ Add to `.env`:
 
 ```
 TELEGRAM_API_BASE=http://localhost:8081
+TELEGRAM_LOCAL_FILES_MAP=/var/lib/telegram-bot-api=C:\telegram-bot-api
 ```
 
-That is the whole code change — `TelegramClient` builds its URLs from this, and
-the download limit follows automatically.
+`TelegramClient` builds its URLs from the first, and the download limit follows
+automatically.
+
+The second exists because of how Docker reports files. A local server hands back
+an absolute path to the file instead of a URL — but that path is inside the
+CONTAINER, while the worker runs on the host. The mapping translates it so the
+worker can copy the file straight off disk. If the mapping is missing or wrong,
+the download falls back to HTTP from the local server, which still works and is
+only slower; it never fails silently.
 
 ## 4. Important: the bot must be logged out of the cloud first
 
@@ -76,8 +102,9 @@ of refusing it.
 - **Disk use.** The server keeps every downloaded file under
   `/var/lib/telegram-bot-api`. It does not clean up on its own; prune the volume
   periodically.
-- **Docker on Windows.** `localhost:8081` works from the host, but the file
-  paths the server returns are paths *inside the container*. Either run the
-  server natively, or bind-mount a host directory at the same path so the worker
-  can read them.
+- **Docker on Windows.** `localhost:8081` works from the host, but the paths the
+  server returns are *inside the container*. The setup script bind-mounts
+  `C:\telegram-bot-api` for exactly this reason, and
+  `TELEGRAM_LOCAL_FILES_MAP` translates the path. Without it the worker falls
+  back to downloading over HTTP — slower, but it still works.
 - **Still 2 GB, not unlimited.** Past that, use the watch folder.
