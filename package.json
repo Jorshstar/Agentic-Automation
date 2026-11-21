@@ -63,7 +63,8 @@
     "demo:thumbnail": "tsx src/demos/thumbnail-demo.ts",
     "demo:stock": "tsx src/demos/stock-demo.ts",
     "demo:historical": "tsx src/demos/historical-demo.ts",
-    "demo:upload-inject": "tsx src/demos/upload-inject-demo.ts"
+    "demo:upload-inject": "tsx src/demos/upload-inject-demo.ts",
+    "clip:select": "tsx src/demos/select-only.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.0",

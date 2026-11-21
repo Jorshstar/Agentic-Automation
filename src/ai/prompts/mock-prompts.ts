@@ -1574,8 +1574,15 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "{ \"clips\": [ { \"startSecond\": number, \"endSecond\": number, \"hook\": string, " +
           "\"reason\": string, \"score\": number } ] }\n" +
           "Times are SECONDS from the start of the video. `hook` is a punchy on-screen title (<=8 words, " +
-          "no quotes, no hashtags) that would make someone stop scrolling. `reason` is one short phrase " +
-          "naming the evidence. Order clips best-first.",
+          "no quotes, no hashtags) that would make someone stop scrolling.\n" +
+          "`hook` MUST describe what happens inside THIS clip's own window — not the moment before it " +
+          "or after it. A reel labelled with the wrong moment is worse than one labelled plainly: a " +
+          "clip of the equaliser titled with the opening goal tells the viewer the video is unreliable. " +
+          "If you cannot tell from the transcript inside the window exactly what happened, write a " +
+          "plain description rather than guessing a specific one.\n" +
+          "`reason` must QUOTE 3-8 words of what is actually said inside the window, in double quotes, " +
+          "so the pick can be checked against the transcript — or, when nothing is said there, name " +
+          "the measured signal instead. Order clips best-first.",
         createdAt: ISO,
       },
     ],

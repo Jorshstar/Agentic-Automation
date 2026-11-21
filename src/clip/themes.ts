@@ -170,7 +170,17 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
       "'equaliser' / 'penalty' / 'header'. Find the moment the ball goes IN. Ignore shots " +
       "that are saved, blocked, or go wide unless the user asked for near misses. If the " +
       "user asked for GOALS specifically, every clip must contain a goal — returning fewer " +
-      "clips is correct, inventing moments is not.\n" +
+      "clips is correct, inventing moments is not. Include goals by BOTH teams: 'the goals' " +
+      "means the goals in the match, not one side's. Going through the video in order and " +
+      "marking each time the score changes is a reliable way to catch all of them — a " +
+      "scoreline mentioned in commentary ('one-nil', 'two-one') tells you one just went in.\n" +
+      "COUNT AGAINST THE TITLE. A highlights package shows every goal, so a title giving a " +
+      "scoreline ('FRANCE 4-1 BELGIUM') tells you how many there are — five, in that example. " +
+      "If you have found fewer, you have missed some: go back through the QUIET commentary and " +
+      "look again. Not every goal is called with the word 'goal'. One was called here as only " +
+      "'Douay... Elisey there as well... to round off a sensational comeback' — a player's name, " +
+      "then language about the result rather than the shot. Celebration talk with no shot " +
+      "language before it usually means the ball is already in.\n" +
       "The pay-off lands a beat AFTER the build-up play, so start ~8-10s BEFORE the shout " +
       "so the viewer sees the move that created it, and end ~4-6s after so the celebration " +
       "lands. Keep clips SHORT (12-20s); a padded goal clip loses viewers. Do NOT pick the " +
