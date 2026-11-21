@@ -135,3 +135,4 @@ describe("bitrateForBudget", () => {
     expect(bitrateForBudget(0, mb(44))).toBeUndefined();
   });
 });
+

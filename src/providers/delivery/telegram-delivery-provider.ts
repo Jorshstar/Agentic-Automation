@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { withRetry } from "../../lib/retry.js";
 import type { DeliveryProvider } from "./delivery-provider.js";
+import { telegramApiBase, uploadLimitBytes } from "../../telegram/telegram-client.js";
 import type {
   DeliveryContext,
   DeliveryRequest,
@@ -17,10 +18,13 @@ import type {
  * configured, it returns a `not-configured` warning rather than failing the run,
  * and a per-file send failure is a warning, not a crash.
  *
- * Bot uploads via sendVideo cap at 50 MB — our vertical shorts are a few MB.
+ * Bot uploads via sendVideo cap at 50 MB. A single short is a few MB, but a
+ * JOINED reel is the sum of its clips and ran straight into that wall — so the
+ * limit is read from one shared place now, not hardcoded here. Pointing
+ * TELEGRAM_API_BASE at a local Bot API server moves both the endpoint and the
+ * ceiling together; they used to move apart.
  */
 
-const TELEGRAM_MAX_BYTES = 50 * 1024 * 1024;
 const CAPTION_LIMIT = 1024;
 
 const DEFAULT_DELIVERY_CONTEXT: DeliveryContext = { sendDocuments: true };
@@ -40,7 +44,7 @@ export class TelegramDeliveryProvider implements DeliveryProvider {
     if (!token || !chatId) {
       return false;
     }
-    return sendMessage(`https://api.telegram.org/bot${token}`, chatId, text, []);
+    return sendMessage(`${telegramApiBase()}/bot${token}`, chatId, text, []);
   }
 
   async deliver(request: DeliveryRequest): Promise<DeliveryResult> {
@@ -57,15 +61,19 @@ export class TelegramDeliveryProvider implements DeliveryProvider {
       return { delivered: false, provider: this.name, videoSent: false, documentsSent: 0, warnings };
     }
 
-    const base = `https://api.telegram.org/bot${token}`;
+    const base = `${telegramApiBase()}/bot${token}`;
     let videoSent = false;
 
     // --- Send the video (with the caption) ---
     const size = await fileSize(request.videoPath);
     if (request.videoPath === "" || size === 0) {
       warnings.push({ code: "missing-file", message: `No video to send at "${request.videoPath}".` });
-    } else if (size > TELEGRAM_MAX_BYTES) {
-      warnings.push({ code: "too-large", message: `Video is ${(size / 1024 / 1024).toFixed(1)} MB (>50 MB); sending caption only.` });
+    } else if (size > uploadLimitBytes()) {
+      const limitMb = Math.round(uploadLimitBytes() / 1024 / 1024);
+      warnings.push({
+        code: "too-large",
+        message: `Video is ${(size / 1024 / 1024).toFixed(1)} MB (over the ${limitMb} MB upload limit); sending caption only.`,
+      });
       await sendMessage(base, chatId, request.caption, warnings);
     } else {
       videoSent = await sendVideo(base, chatId, request.videoPath, request.caption, warnings);

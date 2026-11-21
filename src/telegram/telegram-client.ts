@@ -72,6 +72,27 @@ export function downloadLimitBytes(): number {
     : TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES;
 }
 
+/** Telegram's ceiling for a video a bot SENDS. Lower than you would guess. */
+export const TELEGRAM_BOT_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
+/** A local Bot API server raises sending to the same 2 GB as downloading. */
+export const TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES = 2000 * 1024 * 1024;
+
+/**
+ * The upload ceiling that actually applies right now.
+ *
+ * One number, read in two places that must agree: the compiler sizes a joined
+ * reel to fit under it, and the delivery provider refuses anything over it. If
+ * those two disagree — which they did, because the compiler read
+ * TELEGRAM_API_BASE and the provider hardcoded Telegram's own host — a local
+ * API server would make the compiler stop capping while the provider was still
+ * sending to the endpoint that caps at fifty megabytes.
+ */
+export function uploadLimitBytes(): number {
+  return usingLocalApiServer()
+    ? TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES
+    : TELEGRAM_BOT_UPLOAD_LIMIT_BYTES;
+}
+
 /** Absolute on POSIX (/var/lib/...) or Windows (C:\\...). */
 function isAbsolutePath(value: string): boolean {
   return value.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(value);

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { resolveMediaTool } from "../lib/binaries.js";
+import { uploadLimitBytes } from "../telegram/telegram-client.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -54,7 +55,6 @@ const AUDIO_KBPS = 160;
  * Quality-capped VBR (CRF plus a hard maxrate) keeps the easy seconds cheap and
  * only spends the cap on the hard ones.
  */
-const UPLOAD_LIMIT_MB = Number(process.env.TELEGRAM_MAX_UPLOAD_MB ?? 50);
 /**
  * Headroom for container overhead and the encoder overshooting its cap.
  *
@@ -67,13 +67,14 @@ const UPLOAD_LIMIT_MB = Number(process.env.TELEGRAM_MAX_UPLOAD_MB ?? 50);
 const BUDGET_FRACTION = 0.85;
 
 /**
- * A local telegram-bot-api server raises the limit to 2 GB, so there is no
- * reason to spend quality on a budget that no longer applies.
+ * The limit comes from the delivery layer, not from a copy of it here. A local
+ * telegram-bot-api server raises it to 2 GB, at which point the reel is nowhere
+ * near it and there is no reason to spend quality on a budget that has stopped
+ * applying — hence the cutoff rather than a cap that is always on.
  */
 function budgetBytes(): number {
-  const localApi = (process.env.TELEGRAM_API_BASE ?? "").trim();
-  if (localApi !== "" && !localApi.includes("api.telegram.org")) return Number.POSITIVE_INFINITY;
-  return UPLOAD_LIMIT_MB * 1024 * 1024 * BUDGET_FRACTION;
+  const limit = uploadLimitBytes();
+  return limit > 500 * 1024 * 1024 ? Number.POSITIVE_INFINITY : limit * BUDGET_FRACTION;
 }
 
 /**
@@ -183,12 +184,13 @@ export async function compileClips(
   const limit = budgetBytes();
   if (Number.isFinite(limit)) {
     const size = await fileBytes(outPath);
-    if (size > UPLOAD_LIMIT_MB * 1024 * 1024) {
+    if (size > uploadLimitBytes()) {
+      const limitMb = Math.round(uploadLimitBytes() / 1024 / 1024);
       return {
         ok: false,
         path: "",
         durationSeconds,
-        error: `joined file is ${(size / 1024 / 1024).toFixed(1)} MB, over the ${UPLOAD_LIMIT_MB} MB upload limit`,
+        error: `joined file is ${(size / 1024 / 1024).toFixed(1)} MB, over the ${limitMb} MB upload limit`,
       };
     }
   }
