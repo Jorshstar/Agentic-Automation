@@ -27,6 +27,32 @@ import type {
 
 const CAPTION_LIMIT = 1024;
 
+/**
+ * UPLOADS NEED A DEADLINE.
+ *
+ * A finished McDonald's documentary — scripted, fact-checked, narrated,
+ * illustrated, composed, covered — sat for thirteen minutes inside this upload
+ * and delivered nothing. fetch had no signal, so a stalled connection waits
+ * forever, and the worker was neither working nor erroring with nothing in the
+ * log after the last step it completed. That is the hardest kind of down to
+ * notice, and it was the last gate in front of the user.
+ *
+ * The deadline scales with the file because a flat one is wrong both ways: 30
+ * seconds kills a legitimate 40 MB upload on a slow line, and 20 minutes is no
+ * deadline at all for a text message. Twenty seconds per megabyte is roughly a
+ * 0.4 Mbps uplink — slower than any connection that could have produced the
+ * video in the first place.
+ */
+const TEXT_TIMEOUT_MS = 30_000;
+const UPLOAD_BASE_MS = 60_000;
+const UPLOAD_MS_PER_MB = 20_000;
+const UPLOAD_MAX_MS = 20 * 60_000;
+
+export function uploadTimeoutMs(bytes: number): number {
+  const scaled = UPLOAD_BASE_MS + (Math.max(0, bytes) / (1024 * 1024)) * UPLOAD_MS_PER_MB;
+  return Math.min(UPLOAD_MAX_MS, Math.round(scaled));
+}
+
 const DEFAULT_DELIVERY_CONTEXT: DeliveryContext = { sendDocuments: true };
 
 export class TelegramDeliveryProvider implements DeliveryProvider {
@@ -111,7 +137,14 @@ async function sendVideo(
   form.append("caption", caption.slice(0, CAPTION_LIMIT));
   form.append("supports_streaming", "true");
   form.append("video", await fileBlob(videoPath, "video/mp4"), basename(videoPath));
-  return post(`${base}/sendVideo`, form, "sendVideo", warnings);
+  return post(
+    `${base}/sendVideo`,
+    form,
+    "sendVideo",
+    warnings,
+    uploadTimeoutMs(await fileSize(videoPath)),
+    2,
+  );
 }
 
 async function sendDocument(
@@ -123,7 +156,14 @@ async function sendDocument(
   const form = new FormData();
   form.append("chat_id", chatId);
   form.append("document", await fileBlob(docPath, "application/octet-stream"), basename(docPath));
-  return post(`${base}/sendDocument`, form, "sendDocument", warnings);
+  return post(
+    `${base}/sendDocument`,
+    form,
+    "sendDocument",
+    warnings,
+    uploadTimeoutMs(await fileSize(docPath)),
+    2,
+  );
 }
 
 async function sendMessage(
@@ -143,17 +183,28 @@ async function post(
   form: FormData,
   label: string,
   warnings: DeliveryWarning[],
+  timeoutMs = TEXT_TIMEOUT_MS,
+  attempts = 3,
 ): Promise<boolean> {
   try {
     // Network errors and transient statuses (429/5xx) retry with backoff;
     // permanent 4xx responses fall through to a warning without retrying.
-    const response = await withRetry(async () => {
-      const res = await fetch(url, { method: "POST", body: form });
-      if (res.status === 429 || res.status >= 500) {
-        throw new Error(`Telegram ${label} transient failure (${res.status}).`);
-      }
-      return res;
-    });
+    const response = await withRetry(
+      async () => {
+        const res = await fetch(url, {
+          method: "POST",
+          body: form,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (res.status === 429 || res.status >= 500) {
+          throw new Error(`Telegram ${label} transient failure (${res.status}).`);
+        }
+        return res;
+      },
+      // Fewer attempts on a big upload: three full timeouts on a broken link is
+      // an hour of waiting to learn the same thing twice over.
+      { attempts },
+    );
     if (!response.ok) {
       const detail = (await safeText(response)).slice(0, 300);
       warnings.push({ code: "send-failed", message: `Telegram ${label} failed (${response.status}). ${detail}` });

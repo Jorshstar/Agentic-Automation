@@ -9,6 +9,7 @@ import {
   TELEGRAM_BOT_UPLOAD_LIMIT_BYTES,
   TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES,
 } from "./telegram-client.js";
+import { uploadTimeoutMs } from "../providers/delivery/telegram-delivery-provider.js";
 
 afterEach(() => {
   delete process.env.TELEGRAM_API_BASE;
@@ -71,5 +72,32 @@ describe("uploadLimitBytes", () => {
   it("stays at 50 MB when the base is Telegram's own host", () => {
     process.env.TELEGRAM_API_BASE = "https://api.telegram.org";
     expect(uploadLimitBytes()).toBe(TELEGRAM_BOT_UPLOAD_LIMIT_BYTES);
+  });
+});
+
+/**
+ * A 23 MB documentary sat thirteen minutes inside an upload with no deadline
+ * and delivered nothing. The deadline scales with the file because a flat one
+ * is wrong in both directions.
+ */
+describe("uploadTimeoutMs", () => {
+  it("gives a small file a short deadline", () => {
+    expect(uploadTimeoutMs(1 * 1024 * 1024)).toBeLessThan(2 * 60_000);
+  });
+
+  it("would have tripped on the 23 MB documentary inside thirteen minutes", () => {
+    const timeout = uploadTimeoutMs(23 * 1024 * 1024);
+    expect(timeout).toBeLessThan(13 * 60_000);
+    // ...but not so short that a slow line loses a legitimate upload.
+    expect(timeout).toBeGreaterThan(5 * 60_000);
+  });
+
+  it("caps so a broken link cannot wait forever", () => {
+    expect(uploadTimeoutMs(5_000 * 1024 * 1024)).toBe(20 * 60_000);
+  });
+
+  it("is safe on a zero or negative size", () => {
+    expect(uploadTimeoutMs(0)).toBe(60_000);
+    expect(uploadTimeoutMs(-1)).toBe(60_000);
   });
 });
