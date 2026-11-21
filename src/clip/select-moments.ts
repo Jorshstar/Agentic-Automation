@@ -4,8 +4,8 @@ import { createClaudeAIKernel } from "../ai/index.js";
 import type { TranscriptSegment } from "./transcribe.js";
 import type { AudioAnalysis, AudioEvent, EnergyPeak } from "./audio-energy.js";
 import { eventStrength } from "./audio-energy.js";
-import type { SceneCut } from "./scene-detect.js";
-import { cutsInWindow, snapToCut } from "./scene-detect.js";
+import type { CutBurst, SceneCut } from "./scene-detect.js";
+import { cutsInWindow, findCutBursts, snapToCut } from "./scene-detect.js";
 import type { SourceChapter } from "./source-download.js";
 import type { ClipMode, ThemePlan } from "./themes.js";
 
@@ -61,6 +61,12 @@ export interface SelectInput {
   readonly chapters: readonly SourceChapter[];
   /** Surfaces a degraded path (e.g. the selector model failed) to the caller. */
   readonly onWarn?: (message: string) => void;
+  /**
+   * Progress notes. Worth having because "it only sent me three goals" and "it
+   * sent me three things that are not goals" look identical from the chat, and
+   * the difference is whether the model offered five picks or three.
+   */
+  readonly onNote?: (message: string) => void;
 }
 
 export class ClipMomentSelector {
@@ -132,7 +138,18 @@ export class ClipMomentSelector {
 
     const parsed = parseMoments(generated.output, input.durationSeconds, input.plan);
     const scored = parsed.map((moment) => addEvidence(moment, input));
-    return finalize(scored, input);
+    const kept = finalize(scored, input);
+
+    // Where the shortfall came from, in one line: the model finding little, or
+    // this code discarding what it found, are different problems.
+    if (kept.length < input.count) {
+      const dropped = parsed.length - kept.length;
+      input.onNote?.(
+        `   ${input.count} asked for, ${parsed.length} offered` +
+          `${dropped > 0 ? `, ${dropped} dropped (too short, overlapping, or out of range)` : ""}.`,
+      );
+    }
+    return kept;
   }
 }
 
@@ -141,20 +158,42 @@ export class ClipMomentSelector {
 /**
  * Find moments with no language model at all, from loudness and cuts.
  *
- * The core insight for sports: a goal is a SUSTAINED crowd surge, and broadcast
- * directors always follow it with replays — so a surge with several scene cuts
- * in the next ten seconds is near-certainly the thing the user wants. A brief
- * spike with no replays is a whistle, a shout, or a bad bounce.
+ * TWO detectors, because one video type defeats each of them.
+ *
+ * LOUDNESS works on a full broadcast: a goal is a sustained crowd surge against
+ * a quiet baseline, and directors always follow it with replays — so a surge
+ * with several scene cuts behind it is near-certainly what the user wants.
+ *
+ * It fails completely on a HIGHLIGHTS PACKAGE, which is the most common thing
+ * anyone actually asks to clip goals from. Such a video is loud from the first
+ * frame, so nothing rises above its own baseline: a real twelve-minute "ALL
+ * GOALS" upload produced seven audio events and one sustained surge, and the
+ * selector fell through to evenly-spaced guesses — five clips, not one goal
+ * among them.
+ *
+ * CUT BURSTS cover that case. The same video had 28 scene cuts, and they were
+ * not spread evenly: they clustered, because an editor cuts hard into each goal
+ * and then through its replay angles. Those clusters are the goals, and they are
+ * free to detect. They are candidates in their own right here, not a bonus on an
+ * audio event that may never fire.
+ *
+ * Both detectors feed one ranked list, so whichever signal the video actually
+ * carries is the one that decides.
  */
 export function selectFromSignals(input: SelectInput): readonly ClipMoment[] {
   const { plan } = input;
   const events = [...input.audio.events];
-  if (events.length === 0) return evenlySpacedFallback(input);
+  // input.mode, not plan.mode: a speech theme on a wordless source has already
+  // been degraded to action by the caller, and that is exactly the case with no
+  // transcript to fall back on.
+  const action = input.mode === "action" || plan.mode === "action";
+  const bursts = action ? findCutBursts(input.sceneCuts) : [];
+  if (events.length === 0 && bursts.length === 0) return evenlySpacedFallback(input);
 
   // For action themes a sustained surge is the signal; brief spikes are noise.
-  const candidates = plan.mode === "action" ? preferSurges(events) : events;
+  const candidates = action ? preferSurges(events) : events;
 
-  const scored = candidates.map((event) => {
+  const fromAudio = candidates.map((event) => {
     const replayCuts = cutsInWindow(input.sceneCuts, event.endSecond, event.endSecond + 10);
     const strength = eventStrength(event) + replayCuts * 4 * (plan.weights.scene * 2);
 
@@ -180,7 +219,48 @@ export function selectFromSignals(input: SelectInput): readonly ClipMoment[] {
     };
   });
 
-  return finalize(scored, input);
+  const fromCuts = bursts.map((burst) => momentFromBurst(burst, input));
+  // Audio events and cut bursts often describe the SAME goal from two angles.
+  // finalize() ranks everything together and drops the weaker of any overlap,
+  // so the duplicate costs nothing and the stronger evidence wins.
+  return finalize([...fromAudio, ...fromCuts], input);
+}
+
+/**
+ * Turn a cluster of cuts into a clip window.
+ *
+ * The geometry matters. In an edited package the cuts come AFTER the thing they
+ * are about — the editor cuts away from live play to the replays — so the goal
+ * itself sits just before the first cut of the burst. Starting at the burst
+ * would hand back nothing but replays of a goal the viewer never saw.
+ */
+function momentFromBurst(burst: CutBurst, input: SelectInput): ClipMoment {
+  const { plan } = input;
+  // One extra second of lead over the audio path: a cut burst marks the moment
+  // less precisely than a roar does, so the build-up needs a little more room.
+  const rawStart = burst.startSecond - plan.preRollSeconds - 1;
+  const rawEnd = burst.endSecond + plan.postRollSeconds;
+  const { start, end } = clampToDuration(
+    snapToCut(rawStart, input.sceneCuts, 1.5),
+    rawEnd,
+    plan,
+    input.durationSeconds,
+  );
+
+  // A burst with a loud moment in it is a goal; a burst alone might be a
+  // montage or a graphics sting, so it scores lower.
+  const loud = input.audio.events.find((event) => event.endSecond > start && event.startSecond < end);
+  const evidence = [`${burst.cuts} cuts in ${round1(burst.endSecond - burst.startSecond)}s (replay burst)`];
+  if (loud) evidence.push(`+${loud.prominenceDb}dB over it`);
+
+  return {
+    startSecond: start,
+    endSecond: end,
+    hook: hookFromTranscript(input, start, end) ?? defaultHook(plan.theme),
+    reason: "replay burst — the edit marks this as a highlight",
+    score: burst.cuts * 6 * (plan.weights.scene * 2) + (loud ? eventStrength(loud) * 0.5 : 0),
+    evidence,
+  };
 }
 
 /**

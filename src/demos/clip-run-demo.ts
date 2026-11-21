@@ -67,6 +67,9 @@ async function main(): Promise<void> {
         `${clip.evidence.length > 0 ? `  (${clip.evidence.join(", ")})` : ""}`,
     );
   }
+  if (result.compilationPath) {
+    console.log(`\n🎬 joined into one video: ${result.compilationPath}`);
+  }
   console.log(
     `\n${deliver ? `✅ delivered ${result.delivered}/${result.found}` : `📁 rendered ${result.clips.length}`}` +
       ` clips in ${seconds}s · ${result.transcribedMinutes} min transcribed · files in ${workDir}`,

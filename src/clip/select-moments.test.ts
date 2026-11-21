@@ -264,3 +264,89 @@ describe("ClipMomentSelector degradation", () => {
     expect(moments[0]!.startSecond).toBe(100);
   });
 });
+
+/**
+ * HIGHLIGHTS PACKAGES — the case that produced five clips and zero goals.
+ *
+ * Shape of the real failure: a twelve-minute "ALL GOALS" upload is loud from
+ * end to end, so almost nothing rises above its own baseline. The fixtures here
+ * reproduce that — few or no audio events, but a clear clustering of cuts.
+ */
+describe("selectFromSignals on an edited highlights package", () => {
+  // Four goals, each cut into three replay angles, with quiet play between.
+  const replayBursts: SceneCut[] = [
+    ...cutsAround(70, 4),
+    ...cutsAround(210, 3),
+    ...cutsAround(395, 5),
+    ...cutsAround(560, 3),
+  ];
+
+  it("finds the goals from cut bursts when the audio never surges", () => {
+    const moments = selectFromSignals(
+      input({ durationSeconds: 720, sceneCuts: replayBursts, audio: audio([]) }),
+    );
+
+    expect(moments.length).toBeGreaterThanOrEqual(3);
+    // Every pick must sit on a burst, not on an evenly-spaced guess.
+    for (const moment of moments) {
+      const onBurst = replayBursts.some(
+        (cut) => cut.second >= moment.startSecond && cut.second <= moment.endSecond,
+      );
+      expect(onBurst).toBe(true);
+    }
+    expect(moments.every((m) => m.evidence.some((e) => e.includes("replay burst")))).toBe(true);
+  });
+
+  it("does not fall back to evenly spaced slices", () => {
+    const moments = selectFromSignals(
+      input({ durationSeconds: 720, sceneCuts: replayBursts, audio: audio([]) }),
+    );
+    expect(moments.some((m) => m.reason.includes("evenly spaced"))).toBe(false);
+  });
+
+  it("includes the play BEFORE the replays, not just the replays", () => {
+    const moments = selectFromSignals(
+      input({ durationSeconds: 720, sceneCuts: cutsAround(395, 5), audio: audio([]) }),
+    );
+    // The goal happens before the editor cuts away to the angles.
+    expect(moments[0]!.startSecond).toBeLessThan(395);
+  });
+
+  it("ranks a burst with a crowd roar over a burst without one", () => {
+    const moments = selectFromSignals(
+      input({
+        durationSeconds: 720,
+        sceneCuts: [...cutsAround(70, 3), ...cutsAround(400, 3)],
+        audio: audio([surge(396, 4, 13)]),
+        count: 2,
+      }),
+    );
+    const loud = moments.find((m) => m.startSecond < 400 && m.endSecond > 395);
+    const quiet = moments.find((m) => m.endSecond < 200);
+    expect(loud).toBeDefined();
+    expect(quiet).toBeDefined();
+    expect(loud!.score).toBeGreaterThan(quiet!.score);
+  });
+
+  it("still uses audio alone when there are no cuts at all", () => {
+    const moments = selectFromSignals(
+      input({ durationSeconds: 720, sceneCuts: [], audio: audio([surge(300, 4, 14)]) }),
+    );
+    expect(moments).toHaveLength(1);
+    expect(moments[0]!.evidence[0]).toContain("crowd surge");
+  });
+
+  it("ignores cut bursts for a speech theme", () => {
+    const moments = selectFromSignals(
+      input({
+        plan: planForTheme("the emotional moments"),
+        mode: "speech",
+        durationSeconds: 720,
+        sceneCuts: replayBursts,
+        audio: audio([]),
+      }),
+    );
+    // No audio events and no burst path: this is the honest "nothing to go on".
+    expect(moments.every((m) => m.evidence.includes("no audio events detected"))).toBe(true);
+  });
+});

@@ -85,3 +85,37 @@ describe("effectiveMode", () => {
     expect(effectiveMode(plan, 1400, 600)).toBe("speech");
   });
 });
+
+describe("effectiveMode follows what the source actually contains", () => {
+  const sports = planForTheme("the goals");
+
+  it("reads the commentary when a sports video has any", () => {
+    // 12 minutes of broadcast commentary: ~1500 words.
+    expect(effectiveMode(sports, 1500, 720)).toBe("mixed");
+  });
+
+  it("falls back to signals on a music-only reel", () => {
+    expect(effectiveMode(sports, 20, 720)).toBe("action");
+  });
+
+  it("degrades a speech theme that has no speech", () => {
+    expect(effectiveMode(planForTheme("key insights"), 0, 600)).toBe("action");
+  });
+
+  it("leaves a speech theme alone when there are words", () => {
+    expect(effectiveMode(planForTheme("key insights"), 1200, 600)).toBe("speech");
+  });
+});
+
+describe("compileByDefault", () => {
+  it("is set for sport, where the moments are one reel", () => {
+    expect(planForTheme("the goals").compileByDefault).toBe(true);
+    expect(planForTheme("every knockout").compileByDefault).toBe(true);
+  });
+
+  it("is off where each moment stands alone", () => {
+    for (const theme of ["key insights", "the emotional bits", "funniest moments", "auto"]) {
+      expect(planForTheme(theme).compileByDefault).toBe(false);
+    }
+  });
+});

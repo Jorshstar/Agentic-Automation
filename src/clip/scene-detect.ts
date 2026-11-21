@@ -102,6 +102,65 @@ export function cutsInWindow(cuts: readonly SceneCut[], from: number, to: number
   return count;
 }
 
+/** A run of cuts close together — in an edited package, one highlight. */
+export interface CutBurst {
+  readonly startSecond: number;
+  readonly endSecond: number;
+  readonly cuts: number;
+}
+
+/**
+ * Find clusters of cuts: the shape an edited highlights package makes.
+ *
+ * This exists because surge detection fails on exactly that content. A crowd
+ * roar works as a goal marker in a full match, where the crowd is quiet and
+ * then erupts — but a highlights compilation is nothing BUT highlights, loud
+ * from end to end, so nothing rises above its own baseline. One real run
+ * produced 7 audio events and a single sustained surge across twelve minutes,
+ * and the selector fell back to evenly-spaced guesses.
+ *
+ * The cut pattern survives where the audio does not. An editor cuts hard into a
+ * goal, then through two or three replay angles, then back to play — so each
+ * highlight is a tight burst of cuts separated by quieter stretches. The same
+ * video had 28 cuts, which was the signal nobody was reading.
+ */
+export function findCutBursts(
+  cuts: readonly SceneCut[],
+  /** Cuts further apart than this belong to different highlights. */
+  maxGapSeconds = 6,
+  /** Fewer cuts than this is an ordinary edit, not a highlight. */
+  minCuts = 2,
+): readonly CutBurst[] {
+  if (cuts.length === 0) return [];
+  const ordered = [...cuts].sort((a, b) => a.second - b.second);
+
+  const bursts: CutBurst[] = [];
+  let start = ordered[0]!.second;
+  let end = start;
+  let count = 1;
+
+  const flush = (): void => {
+    if (count >= minCuts) bursts.push({ startSecond: start, endSecond: end, cuts: count });
+  };
+
+  for (const cut of ordered.slice(1)) {
+    if (cut.second - end <= maxGapSeconds) {
+      end = cut.second;
+      count++;
+    } else {
+      flush();
+      start = cut.second;
+      end = cut.second;
+      count = 1;
+    }
+  }
+  flush();
+
+  // Densest first: more cuts in a burst means more replay angles, which is how
+  // an editor marks the moment that mattered most.
+  return bursts.sort((a, b) => b.cuts - a.cuts);
+}
+
 /**
  * Snap a clip boundary to the nearest scene cut within `toleranceSeconds`, so a
  * clip starts on a clean edit rather than halfway through a shot. Returns the

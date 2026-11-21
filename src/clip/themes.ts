@@ -55,6 +55,15 @@ export interface ThemePlan {
   readonly guidance: string;
   /** Caption preset that suits the theme. */
   readonly captionPreset: "bold-yellow" | "clean-white" | "impact-red";
+  /**
+   * Whether the moments are pieces of ONE video rather than separate clips.
+   *
+   * True for sport: "clip the goals" asks for the goals, and five files is five
+   * things to open to watch one match. False where each moment already stands
+   * on its own — a forty-second story glued to four unrelated ones is worse
+   * than any of them alone.
+   */
+  readonly compileByDefault: boolean;
 }
 
 export type ThemeFamily =
@@ -151,13 +160,22 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
     postRollSeconds: 5,
     needsSceneDetection: true,
     captionPreset: "impact-red",
+    compileByDefault: true,
     guidance:
-      "This is ACTION content. The moment is a crowd roar / commentary shout, and the " +
-      "pay-off lands a beat AFTER the build-up play. Start ~8-10s BEFORE the roar so the " +
-      "viewer sees the move that created it, and end ~4-6s after so the celebration lands. " +
-      "Replay cuts right after a roar confirm a real highlight — prefer those. Keep clips " +
-      "SHORT (12-20s); a padded goal clip loses viewers. If commentary is sparse or absent, " +
-      "trust the loud moments and scene-cut bursts over the transcript.",
+      "This is SPORT. If there is commentary, it is your best evidence by far — far better " +
+      "than the loudness numbers, because broadcast audio is compressed and a goal barely " +
+      "registers louder than a throw-in. A goal is unmistakable in what the commentator " +
+      "SAYS: the scorer's name with a verb of scoring, an exclamation (GOAL, what a finish, " +
+      "he's done it, that is superb), a new scoreline (one-nil, two-one), or the word " +
+      "'equaliser' / 'penalty' / 'header'. Find the moment the ball goes IN. Ignore shots " +
+      "that are saved, blocked, or go wide unless the user asked for near misses. If the " +
+      "user asked for GOALS specifically, every clip must contain a goal — returning fewer " +
+      "clips is correct, inventing moments is not.\n" +
+      "The pay-off lands a beat AFTER the build-up play, so start ~8-10s BEFORE the shout " +
+      "so the viewer sees the move that created it, and end ~4-6s after so the celebration " +
+      "lands. Keep clips SHORT (12-20s); a padded goal clip loses viewers. Do NOT pick the " +
+      "replay that follows a goal — pick the live action. If commentary is sparse or absent, " +
+      "trust the loud moments and scene-cut bursts instead.",
   },
 
   /**
@@ -172,6 +190,7 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
     postRollSeconds: 4,
     needsSceneDetection: false,
     captionPreset: "bold-yellow",
+    compileByDefault: false,
     guidance:
       "This is COMEDY. A laugh spike marks the PUNCHLINE, not the clip start — the set-up " +
       "that makes it funny comes before it. Always include the full set-up→punchline→reaction " +
@@ -191,6 +210,7 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
     postRollSeconds: 3,
     needsSceneDetection: false,
     captionPreset: "clean-white",
+    compileByDefault: false,
     guidance:
       "This is EMOTIONAL content. Do NOT rely on loud moments — the strongest emotional beats " +
       "are usually QUIET: a voice breaking, a long pause, a confession, a turning point. Look " +
@@ -207,6 +227,7 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
     postRollSeconds: 2,
     needsSceneDetection: false,
     captionPreset: "clean-white",
+    compileByDefault: false,
     guidance:
       "This is EDUCATIONAL content. Pick moments that deliver ONE complete, self-contained idea " +
       "a viewer can act on. The clip must contain the claim AND its payoff/explanation — a tip " +
@@ -222,6 +243,7 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
     postRollSeconds: 4,
     needsSceneDetection: false,
     captionPreset: "impact-red",
+    compileByDefault: false,
     guidance:
       "This is CONFLICT content. Find the moment the disagreement IGNITES — an interruption, a " +
       "direct challenge, a flat contradiction. Include the claim that triggered it and at least " +
@@ -236,6 +258,7 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
     postRollSeconds: 5,
     needsSceneDetection: true,
     captionPreset: "bold-yellow",
+    compileByDefault: false,
     guidance:
       "This is REACTION content. The clip is: the SET-UP (what was revealed/shown) immediately " +
       "followed by the REACTION to it. Both halves are mandatory — a reaction with no reveal is " +
@@ -250,6 +273,7 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
     postRollSeconds: 3,
     needsSceneDetection: false,
     captionPreset: "clean-white",
+    compileByDefault: false,
     guidance:
       "This is STORYTELLING. A clip must be a COMPLETE arc: situation → complication → resolution. " +
       "Start where the story starts, not mid-way. If a story cannot fit in the max duration, skip " +
@@ -264,6 +288,7 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
     postRollSeconds: 2,
     needsSceneDetection: false,
     captionPreset: "bold-yellow",
+    compileByDefault: false,
     guidance:
       "Find sharp, QUOTABLE lines that stand alone with zero context — the kind people screenshot. " +
       "Keep clips tight around the line itself plus the minimum framing needed. Cut hard once the " +
@@ -278,6 +303,7 @@ const PLANS: Readonly<Record<ThemeFamily, Omit<ThemePlan, "theme" | "family">>> 
     postRollSeconds: 4,
     needsSceneDetection: false,
     captionPreset: "bold-yellow",
+    compileByDefault: false,
     guidance:
       "No specific theme was given. Pick the moments with the highest standalone pull: surprising " +
       "claims, strong emotion, big reactions, sharp insight, or visible action. Spread picks across " +
@@ -322,11 +348,28 @@ export function isSparseSpeech(wordCount: number, durationSeconds: number): bool
 }
 
 /**
- * Effective mode for a job: a speech-led theme degrades to action mode when the
- * source has no usable speech, instead of returning zero clips (which is what
- * the old pipeline did on music-only reels).
+ * Effective mode for a job, decided by what the source actually contains.
+ *
+ * TWO moves, and the second was bought with a wasted run.
+ *
+ * A speech-led theme degrades to ACTION when there is no usable speech, instead
+ * of returning zero clips — which is what the old pipeline did on music-only
+ * reels.
+ *
+ * An action theme is promoted to MIXED when there IS commentary. This is the
+ * one that mattered. "Clip the goals" on a France 4-1 Belgium highlights
+ * package returned five clips and no goals, and the reason was not the detector
+ * being weak — it was that an action theme never read the transcript at all,
+ * while the video carried a full commentary track naming every scorer. The
+ * loudness it fell back on had nothing in it: broadcast audio is limited, so a
+ * goal lifted the level by six decibels, the same as a throw-in. Meanwhile the
+ * commentator was saying the word.
+ *
+ * So: use the words whenever there are words, and keep the signal detectors for
+ * when there are none.
  */
 export function effectiveMode(plan: ThemePlan, wordCount: number, durationSeconds: number): ClipMode {
   if (isSparseSpeech(wordCount, durationSeconds)) return "action";
+  if (plan.mode === "action") return "mixed";
   return plan.mode;
 }

@@ -1435,6 +1435,11 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "subtitles', 'remove the watermark', 'take off the caption', 'cut the pauses' — copy those " +
           "words into `extras`. Leave `extras` as \"\" otherwise. This matters: nothing is added to a " +
           "clip unless they asked, so inventing an extra changes their video without permission.\n" +
+          "ONE VIDEO OR SEVERAL: asking for one kind of thing ('the goals') is asking for ONE video " +
+          "containing them, and the system joins the moments for action footage by default. `count` " +
+          "is how many MOMENTS to find inside it, not how many files to send. If they want them apart " +
+          "('send them separately', 'as individual clips') or explicitly together ('one video', 'a " +
+          "reel'), copy those words into `extras` so the system honours it.\n" +
           "The THEME is the important part and it can be anything: 'the goals', 'funniest moments', " +
           "'the emotional bits', 'key insights', 'every knockout', 'the arguments'. Pass the user's " +
           "own words through — do not flatten them to a generic label. Use \"auto\" only when they " +
@@ -1465,7 +1470,8 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
           "not an order-taker — but ask ONE thing at a time and never interrogate.\n\n" +
           "OUTPUT: Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY:\n" +
           "{ \"reply\": string, \"action\": \"chat\" | \"build\" | \"clip\" | \"documentary\", \"brief\": string, " +
-          "\"useAssets\": boolean, \"url\": string, \"theme\": string, \"count\": number, \"layout\": string }\n" +
+          "\"useAssets\": boolean, \"url\": string, \"theme\": string, \"count\": number, \"layout\": string, " +
+          "\"extras\": string, \"documentaryTopic\": string }\n" +
           "When action is \"chat\", `brief` and `url` must be \"\". Only set `url` for a \"clip\" action.",
         createdAt: ISO,
       },

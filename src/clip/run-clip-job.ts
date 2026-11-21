@@ -7,12 +7,13 @@ import { detectSceneCuts } from "./scene-detect.js";
 import { ClipMomentSelector } from "./select-moments.js";
 import type { ClipMoment } from "./select-moments.js";
 import { planForTheme, effectiveMode } from "./themes.js";
-import type { ThemePlan } from "./themes.js";
+import type { ClipMode, ThemePlan } from "./themes.js";
 import { planReframe, defaultModeForTheme, parseLayoutInstruction } from "./reframe.js";
 import type { ReframeMode } from "./reframe.js";
 import { renderClip } from "./render-clip.js";
 import type { CaptionPresetName } from "./captions.js";
 import { checkClip, describeIssues } from "./qa.js";
+import { compileClips, wantsCompilation } from "./compile.js";
 import { detectOverlays, describeRegions } from "./overlay.js";
 import { TelegramDeliveryProvider } from "../providers/delivery/index.js";
 import { TelegramClient } from "../telegram/telegram-client.js";
@@ -91,6 +92,15 @@ export interface ClipJob {
    * for the same reason: it removes footage, so it changes the clip.
    */
   readonly tighten?: boolean | string;
+  /**
+   * Return the moments as ONE joined video instead of separate files.
+   *
+   * Left unset, the content decides: a request for one subject in action
+   * footage ("the goals") is a reel and comes back as one video, while a set of
+   * standalone talking moments comes back as separate clips. Accepts the user's
+   * own words too — "all in one", "as separate clips".
+   */
+  readonly compile?: boolean | string;
 }
 
 export interface RenderedClip {
@@ -109,6 +119,8 @@ export interface ClipJobResult {
   readonly found: number;
   readonly title: string;
   readonly clips: readonly RenderedClip[];
+  /** Set when the moments were joined into one video, and that is what shipped. */
+  readonly compilationPath?: string;
   /** Audio minutes actually sent to Whisper — the main variable cost. */
   readonly transcribedMinutes: number;
 }
@@ -137,13 +149,18 @@ export async function runClipJob(
   // remove the watermark") from chat and from watch-folder file names. The
   // extras still steer rendering, but they must not reach the selector's prompt
   // as part of WHAT to clip — "remove the watermark" is not a kind of moment.
-  const plan = planForTheme(stripExtras(job.theme));
+  // Keep the user's sentence intact for the opt-ins, and strip it only for the
+  // selector. These used to both read the STRIPPED theme, which meant "funny
+  // moments, add captions" had "add captions" removed before anything looked
+  // for it — so an extra asked for in the same breath as the theme never fired.
+  const request = job.theme ?? "";
+  const plan = planForTheme(stripExtras(request));
   const count = Math.min(Math.max(job.count || 5, 1), MAX_CLIPS);
 
   // Everything that ADDS to or CHANGES the clip is opt-in. A clip nobody asked
   // to have captioned should come back as the footage, not as an edit of it.
-  const wantsCaps = optedIn(job.captions, wantsCaptions, plan.theme);
-  const wantsTighten = optedIn(job.tighten, wantsTightening, plan.theme);
+  const wantsCaps = optedIn(job.captions, wantsCaptions, request);
+  const wantsTighten = optedIn(job.tighten, wantsTightening, request);
 
   // Check the tooling BEFORE anything expensive. A missing ffmpeg used to
   // surface as a bare ENOENT after the source had already been downloaded.
@@ -181,6 +198,9 @@ export async function runClipJob(
   if (mode === "action" && plan.mode !== "action") {
     log("🎵 Barely any speech here — switching to audio-and-cuts detection.");
   }
+  if (mode === "mixed" && plan.mode === "action") {
+    log("🎙 There's commentary — reading it to find the moments, not just the noise.");
+  }
 
   /* --------------------------- 4. pick moments --------------------------- */
   log(`🎯 Finding the best ${describeTheme(plan)}…`);
@@ -196,12 +216,14 @@ export async function runClipJob(
     sceneCuts,
     chapters: source.chapters,
     onWarn: log,
+    onNote: log,
   });
 
   // Reported on every exit path, so it is accumulated in one place and rounded
   // in one place — four separate returns had drifted into reporting it three
   // different ways, one of them an unrounded float.
   let transcribedMinutes = selection.minutes;
+  let compilationSeconds = 0;
 
   if (moments.length === 0) {
     log(`🤔 Nothing here matches ${describeTheme(plan)}. Try another angle or another video.`);
@@ -239,11 +261,11 @@ export async function runClipJob(
   const wantsOverlayRemoval =
     job.removeOverlays === true ||
     (typeof job.removeOverlays === "string" && wantsOverlaysGone(job.removeOverlays)) ||
-    wantsOverlaysGone(plan.theme);
+    wantsOverlaysGone(request);
 
   const reframeMode =
     parseLayoutInstruction(job.reframe ?? "") ??
-    parseLayoutInstruction(plan.theme) ??
+    parseLayoutInstruction(request) ??
     defaultModeForTheme(plan);
   log(`🖼 Layout: ${describeLayout(reframeMode)}`);
   const captionPreset = job.captionPreset ?? plan.captionPreset;
@@ -331,7 +353,32 @@ export async function runClipJob(
     };
   }
 
-  /* ---------------------------- 7. deliver ---------------------------- */
+  /* ------------------------- 7. one video, or many ------------------------- */
+  // "Clip the goals" asks for the goals — one thing to watch. Five files for one
+  // request makes the viewer open five files to see one match. Separate files
+  // are for separate requests.
+  //
+  // Joined BEFORE the delivery check, so a local test run produces the same
+  // artifact the chat would receive. It used to sit after it, which meant the
+  // one output worth inspecting was the one --no-send never made.
+  let compilationPath: string | undefined;
+  if (shouldCompile(job, request, plan, mode, good.length)) {
+    log(`🎬 Joining ${good.length} moment(s) into one video…`);
+    const joined = await compileClips(
+      good.map((clip) => clip.path),
+      join(opts.workDir, "compilation.mp4"),
+    );
+    if (joined.ok) {
+      compilationPath = joined.path;
+      compilationSeconds = joined.durationSeconds;
+    } else {
+      // The right failure: the moments were found and rendered, and all that is
+      // lost is the convenience of one file.
+      log(`⚠️ Couldn't join them (${joined.error ?? "unknown"}). Sending the clips separately.`);
+    }
+  }
+
+  /* ---------------------------- 8. deliver ---------------------------- */
   if (opts.deliver === false) {
     log(`📁 Delivery off — ${good.length} clip(s) left in ${opts.workDir}`);
     return {
@@ -339,13 +386,31 @@ export async function runClipJob(
       found: finalMoments.length,
       title: source.title,
       clips: good,
+      compilationPath,
+      transcribedMinutes: round1(transcribedMinutes),
+    };
+  }
+
+  const delivery = new TelegramDeliveryProvider();
+
+  if (compilationPath !== undefined) {
+    const sent = await delivery.deliver({
+      videoPath: compilationPath,
+      caption: buildCompilationCaption(good, compilationSeconds, plan, source.title),
+      documents: [],
+    });
+    return {
+      delivered: sent.videoSent ? 1 : 0,
+      found: finalMoments.length,
+      title: source.title,
+      clips: good.map((clip) => ({ ...clip, delivered: sent.videoSent })),
+      compilationPath,
       transcribedMinutes: round1(transcribedMinutes),
     };
   }
 
   // Sequential on purpose: Telegram rate-limits uploads, and a burst of parallel
   // sends gets throttled and arrives out of order.
-  const delivery = new TelegramDeliveryProvider();
   const finalClips: RenderedClip[] = [];
   let delivered = 0;
   for (const clip of good) {
@@ -365,6 +430,59 @@ export async function runClipJob(
     clips: finalClips,
     transcribedMinutes: round1(transcribedMinutes),
   };
+}
+
+/**
+ * One video or several?
+ *
+ * The user's own words win. With nothing said, ACTION content compiles and
+ * everything else does not — and the split is about what a clip is worth on its
+ * own. A fifteen-second goal is a fragment; six of them are a highlights reel,
+ * and that is the artifact. A forty-second story or explanation already stands
+ * alone, and gluing five unrelated ones together makes a worse video than any
+ * one of them.
+ */
+export function shouldCompile(
+  job: ClipJob,
+  theme: string,
+  plan: ThemePlan,
+  mode: ClipMode,
+  clipCount: number,
+): boolean {
+  if (clipCount < 2) return false; // nothing to join
+  if (typeof job.compile === "boolean") return job.compile;
+  if (typeof job.compile === "string" && job.compile.trim() !== "") {
+    const asked = wantsCompilation(job.compile);
+    if (asked !== undefined) return asked;
+  }
+  const fromTheme = wantsCompilation(theme);
+  if (fromTheme !== undefined) return fromTheme;
+  // The theme decides, not the detector that happened to run: a goals request
+  // is one reel whether the commentary was read or the crowd was.
+  return plan.compileByDefault || mode === "action";
+}
+
+/** The caption for a joined reel: what is in it, and where each moment starts. */
+function buildCompilationCaption(
+  clips: readonly RenderedClip[],
+  totalSeconds: number,
+  plan: ThemePlan,
+  sourceTitle: string,
+): string {
+  // Running offsets inside the JOINED video, so a viewer can jump to a moment —
+  // the source timestamps are no use once the clips are glued together.
+  let offset = 0;
+  const lines = clips.slice(0, 10).map((clip, index) => {
+    const at = formatTimestamp(offset);
+    offset += clip.durationSeconds;
+    return `${at}  ${index + 1}. ${clip.hook.slice(0, 48)}`;
+  });
+
+  return (
+    `🎬 ${describeTheme(plan)} — ${clips.length} moment(s), ${Math.round(totalSeconds)}s\n\n` +
+    `${lines.join("\n")}\n\n` +
+    `Clipped from "${sourceTitle.slice(0, 90)}"`
+  );
 }
 
 /* -------------------------------- upload -------------------------------- */
@@ -509,7 +627,7 @@ function formatTimestamp(seconds: number): string {
  */
 export function stripExtras(theme: string): string {
   const EXTRA_PHRASES =
-    /\b((remove|delete|erase|take off|get rid of|hide|without|no)\b[^,.]{0,30}\b(caption|captions|title|titles|text|watermark|overlay|logo|banner|subtitle|subtitles|writing)|(add|with|put|include|burn)\b[^,.]{0,20}\b(caption|captions|subtitle|subtitles|subs?)|tighten(ed)?( it)?( up)?|cut (the )?(dead ?air|pauses|silence)|remove (the )?(dead ?air|pauses|silence)|make it (vertical|portrait|full ?screen)|vertical|portrait|full ?screen|like ?tik ?tok|original size|same size|as.?is)\b/giu;
+    /\b((remove|delete|erase|take off|get rid of|hide|without|no)\b[^,.]{0,30}\b(caption|captions|title|titles|text|watermark|overlay|logo|banner|subtitle|subtitles|writing)|(add|with|put|include|burn)\b[^,.]{0,20}\b(caption|captions|subtitle|subtitles|subs?)|tighten(ed)?( it)?( up)?|cut (the )?(dead ?air|pauses|silence)|remove (the )?(dead ?air|pauses|silence)|make it (vertical|portrait|full ?screen)|vertical|portrait|full ?screen|like ?tik ?tok|original size|same size|as.?is|(as )?(one|a single|1) video|all in one|in one (video|file)|(send (them|each) )?(as )?(separate|individual)\w*( (clips|videos|files))?|one at a time|one by one|(stitch|combine|merge|join)( them)?( together)?)\b/giu;
 
   const cleaned = theme
     .replace(EXTRA_PHRASES, "")

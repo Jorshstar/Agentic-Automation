@@ -152,7 +152,11 @@ async function handleUpdate(
     const queued = await queue.enqueue({
       url: decision.url,
       fileId: decision.url === "" ? upload?.fileId : undefined,
-      theme: decision.theme,
+      // The extras ride along in the theme sentence. runClipJob strips them
+      // before the selector sees it, and matches them for rendering — so
+      // "the goals, remove the watermark" does both halves. Dropping them here
+      // is what made every extra asked for in chat a no-op.
+      theme: [decision.theme, decision.extras].filter((part) => part.trim() !== "").join(", "),
       count: decision.count,
       reframe: decision.layout,
     });
