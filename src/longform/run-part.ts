@@ -287,6 +287,10 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
       keywords: [topic],
       durationSeconds: composed.durationSeconds,
       platform: "YouTube",
+      // A documentary part is not a Short. The short prompt writes a two-line
+      // teaser, which undersells a researched video and leaves the search
+      // terms that make it findable unsaid.
+      format: "longform",
     })
     .catch(() => undefined);
   if (seo?.youtube?.title) log(`   "${seo.youtube.title}"`);

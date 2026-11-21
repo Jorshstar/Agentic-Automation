@@ -20,8 +20,13 @@ import type {
  * structured warning — the video is never blocked.
  */
 
-/** The prompt this provider drives. The TEXT lives in the Prompt Management System. */
+/**
+ * The prompts this provider drives. The TEXT lives in the Prompt Management
+ * System. Two of them, because a Short and a documentary part want different
+ * descriptions: a teaser against a full write-up.
+ */
 const SEO_PROMPT_ID = "seo.user";
+const SEO_LONGFORM_PROMPT_ID = "seo-longform.user";
 /** Role + rules, sent as the system instruction. */
 const SEO_SYSTEM_PROMPT_ID = "seo.system";
 
@@ -33,8 +38,10 @@ export class ClaudeSeoProvider implements SeoProvider {
   async generate(request: SeoRequest): Promise<SeoPack> {
     const warnings: SeoWarning[] = [];
 
+    const longform = request.format === "longform";
+
     const generateRequest: AIGenerateRequest = {
-      promptId: SEO_PROMPT_ID,
+      promptId: longform ? SEO_LONGFORM_PROMPT_ID : SEO_PROMPT_ID,
       systemPromptId: SEO_SYSTEM_PROMPT_ID,
       variables: {
         topic: request.topic,
@@ -51,7 +58,7 @@ export class ClaudeSeoProvider implements SeoProvider {
       // Generous because reasoning models spend part of the budget thinking
       // before they write, and a short budget returns an empty completion with
       // a 200 status.
-      maxTokens: 2000,
+      maxTokens: longform ? 4000 : 2000,
       // SEO is text work, so it follows whichever text endpoint is configured.
       ...textProviderOptions("SEO_MODEL"),
     };
@@ -99,7 +106,12 @@ function parseSeoPack(
     title: clamp(requireString(yt["title"], "youtube.title", fallback.title, warnings), 100),
     description: requireString(yt["description"], "youtube.description", fallback.description, warnings),
     tags: asStringArray(yt["tags"]).map((tag) => tag.toLowerCase()),
-    hashtags: normalizeHashtags(asStringArray(yt["hashtags"]), ["#shorts"]),
+    // #shorts is forced only when the video IS a Short. Putting it on a
+    // documentary part files it as something it is not.
+    hashtags: normalizeHashtags(
+      asStringArray(yt["hashtags"]),
+      request.format === "longform" ? [] : ["#shorts"],
+    ),
   };
   const tiktok: TikTokSeo = {
     caption: clamp(requireString(tk["caption"], "tiktok.caption", request.hook, warnings), 150),
@@ -126,7 +138,10 @@ function fallbackPack(request: SeoRequest, warnings: readonly SeoWarning[]): Seo
       title: f.title,
       description: f.description,
       tags: request.keywords.map((keyword) => keyword.toLowerCase()),
-      hashtags: normalizeHashtags([nicheHashtag(request.niche)], ["#shorts"]),
+      hashtags: normalizeHashtags(
+        [nicheHashtag(request.niche)],
+        request.format === "longform" ? [] : ["#shorts"],
+      ),
     },
     tiktok: {
       caption: clamp(request.hook || request.topic, 150),
@@ -135,7 +150,7 @@ function fallbackPack(request: SeoRequest, warnings: readonly SeoWarning[]): Seo
     thumbnailText: clamp(fallbackThumbText(request.topic), 24),
     warnings,
     metadata: {
-      promptId: SEO_PROMPT_ID,
+      promptId: request.format === "longform" ? SEO_LONGFORM_PROMPT_ID : SEO_PROMPT_ID,
       promptVersion: "fallback",
       provider: "none",
       model: "none",

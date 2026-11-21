@@ -4,7 +4,7 @@ import type { DocumentaryJob } from "./clip-queue.js";
 import { runPart } from "../longform/run-part.js";
 import { createSeriesStore } from "../longform/series.js";
 import { TelegramDeliveryProvider } from "../providers/delivery/index.js";
-import { uploadKit } from "../longform/upload-kit.js";
+import { uploadKitMessages } from "../longform/upload-kit.js";
 import { runClipJob } from "./run-clip-job.js";
 import {
   archive,
@@ -200,8 +200,12 @@ async function handleDocumentary(
     // The upload kit, as text to paste straight into YouTube. It was being
     // written on every part and thrown away: the cover was drawn, the title,
     // description and tags were generated, and none of it left the machine.
-    const kit = uploadKit(result);
-    if (kit !== "") await telegram.send(kit);
+    // Sent in order, and split rather than trimmed: a full description is the
+    // point of the long-form kit, so cutting it to fit a chat limit would undo
+    // the thing it was asked for.
+    for (const message of uploadKitMessages(result)) {
+      await telegram.send(message);
+    }
 
     await telegram.send(
       result.complete

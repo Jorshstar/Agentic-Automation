@@ -21,17 +21,27 @@ export interface SeoRequest {
   readonly durationSeconds: number;
   /** Target platform label (e.g. "YouTube Shorts"). Defaults when omitted. */
   readonly platform?: string;
+  /**
+   * How much description to write.
+   *
+   * "short" (the default) is the two-to-four sentence teaser a Short wants.
+   * "longform" is a full upload description — several paragraphs covering what
+   * this part actually contains, where it sits in the series, and its sources.
+   * A documentary published with a two-line description is undersold, and that
+   * is what the short prompt produced for one.
+   */
+  readonly format?: "short" | "longform";
 }
 
 /** YouTube upload metadata. */
 export interface YouTubeSeo {
   /** ≤90 chars, curiosity-driven, faithful to the content. */
   readonly title: string;
-  /** 2-4 sentences, hook-led, ends with a CTA. No hashtags inside. */
+  /** Hook-led, ends with a CTA, no hashtags inside. Length follows `format`. */
   readonly description: string;
   /** 10-15 plain lowercase search phrases for the tags box (no '#'). */
   readonly tags: readonly string[];
-  /** 3-5 hashtags incl. #shorts (the first 3 show above the title). */
+  /** 3-5 hashtags; #shorts is forced only for short-format video. */
   readonly hashtags: readonly string[];
 }
 

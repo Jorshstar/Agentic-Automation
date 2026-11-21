@@ -66,7 +66,8 @@
     "demo:upload-inject": "tsx src/demos/upload-inject-demo.ts",
     "clip:select": "tsx src/demos/select-only.ts",
     "bot:health": "tsx src/demos/bot-health.ts",
-    "research:check": "tsx src/demos/research-check.ts"
+    "research:check": "tsx src/demos/research-check.ts",
+    "kit": "tsx src/demos/upload-kit-demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.0",

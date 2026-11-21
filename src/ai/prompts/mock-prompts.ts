@@ -1082,6 +1082,78 @@ export const MOCK_PROMPTS: readonly PromptDefinition[] = [
   },
   {
     metadata: {
+      id: "seo-longform.user",
+      name: "SEO Upload Pack User Prompt (long form)",
+      description: "Upload metadata for a documentary part, with a FULL description rather than a teaser.",
+      owner: "growth-team",
+      createdAt: ISO,
+      updatedAt: ISO,
+      version: "v1",
+      status: "stable",
+      tags: ["seo", "user", "longform"],
+      outputFormat: "json",
+      preferredProvider: "claude",
+      preferredModel: "claude-opus-4-8",
+      temperature: 0.6,
+      requiredVariables: [
+        "topic",
+        "hook",
+        "script",
+        "niche",
+        "tone",
+        "audience",
+        "keywords",
+        "durationSeconds",
+      ],
+    },
+    versions: [
+      {
+        version: "v1",
+        status: "stable",
+        template:
+          "You write the upload metadata for a documentary video. Write the FULL description, " +
+          "not a teaser \u2014 this is the text that sits under the video and does the work of " +
+          "selling it, explaining it, and making it findable.\n\n" +
+          "Video: a {{durationSeconds}}-second {{niche}} part, for a {{audience}} audience, in a " +
+          "{{tone}} tone.\n" +
+          "Topic: {{topic}}\n" +
+          "Hook: {{hook}}\n" +
+          "Keywords: {{keywords}}\n\n" +
+          "Full narration:\n{{script}}\n\n" +
+          "Return ONLY valid JSON (no markdown fences, no commentary) matching EXACTLY this shape:\n" +
+          "{\n" +
+          "  \"youtube\": { \"title\": string, \"description\": string, \"tags\": string[], \"hashtags\": string[] },\n" +
+          "  \"tiktok\": { \"caption\": string, \"hashtags\": string[] },\n" +
+          "  \"thumbnailText\": string\n" +
+          "}\n\n" +
+          "youtube.description must be 180-320 words across THREE labelled paragraphs, separated " +
+          "by blank lines, in this order:\n" +
+          "1. An opening paragraph that leads with the hook and sets the stakes \u2014 why this " +
+          "story is worth 60 seconds. Write it as prose, no heading.\n" +
+          "2. A paragraph beginning \"In this part:\" listing what this episode actually covers, " +
+          "naming the real people, places, dates and numbers that appear in the narration. This " +
+          "is the part that makes the video findable, so be concrete and specific.\n" +
+          "3. A closing paragraph that points at what comes next WITHOUT resolving it, then asks " +
+          "for a like and a subscribe so the next part is not missed.\n" +
+          "Use ONLY facts that appear in the narration above. Do not invent a date, a figure or a " +
+          "name that is not there \u2014 an unverifiable description undoes the point of a " +
+          "researched video. Do not put hashtags inside the description, and do not write a " +
+          "sources list: the pipeline appends the real citations afterwards.\n\n" +
+          "Other rules: youtube.title is at most 90 characters, curiosity-driven but faithful " +
+          "(no false promises); one emoji is allowed. youtube.tags are 15-20 short lowercase " +
+          "search phrases (no '#'), mixing the broad subject with the specific names and terms " +
+          "used in this part. youtube.hashtags are exactly 3-5, topical to the subject \u2014 do " +
+          "NOT include \"#shorts\" unless the video is under 60 seconds. thumbnailText is 2-4 " +
+          "punchy words for the cover image, ALL CAPS, at most 20 characters, curiosity-spiking, " +
+          "no spoilers, no hashtags, no emoji. tiktok.caption is at most 130 characters, punchy, " +
+          "no hashtags inside it. tiktok.hashtags are 4-6 and must include \"#fyp\". Every " +
+          "hashtag starts with '#' and contains no spaces.",
+        createdAt: ISO,
+      },
+    ],
+  },
+  {
+    metadata: {
       id: "seo.user",
       name: "SEO Upload Pack User Prompt",
       description: "Generates platform-ready YouTube/TikTok upload metadata for a finished video.",

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { uploadKit } from "./upload-kit.js";
+import { uploadKit, uploadKitMessages } from "./upload-kit.js";
 
 const fields = (over: Partial<Parameters<typeof uploadKit>[0]> = {}) => ({
   youtubeTitle: "How McDonald's Took Over the World 🌍 | The Fast Food Revolution Begins",
@@ -31,17 +31,10 @@ describe("uploadKit", () => {
     expect(kit).toContain("🏷 TAGS");
   });
 
-  /**
-   * Telegram refuses a message over 4096 characters. A kit that is silently
-   * dropped for being too long is the same failure this module exists to fix.
-   */
-  it("fits inside a Telegram message, trimming only the description", () => {
-    const kit = uploadKit(fields({ youtubeDescription: "word ".repeat(2000) }));
-    expect(kit.length).toBeLessThan(4096);
-    // The parts that are useless when clipped survive whole.
-    expect(kit).toContain("The Fast Food Revolution Begins");
-    expect(kit).toContain("mcdonalds, fast food, documentary");
-    expect(kit).toContain("…");
+  it("keeps the description whole, however long it is", () => {
+    // Trimming it would undo the thing the long-form kit exists to produce.
+    const description = "word ".repeat(2000).trim();
+    expect(uploadKit(fields({ youtubeDescription: description }))).toContain(description);
   });
 
   it("caps a runaway tag list", () => {
@@ -82,15 +75,61 @@ describe("uploadKit hashtags", () => {
     expect(uploadKit(fields())).not.toContain("HASHTAGS");
   });
 
-  it("keeps the whole kit inside a Telegram message", () => {
-    const kit = uploadKit(
+  it("survives a split without losing the hashtags", () => {
+    const messages = uploadKitMessages(
       fields({
         youtubeDescription: "word ".repeat(2000),
         tags: Array.from({ length: 30 }, (_, i) => `tag-number-${i}`),
         hashtags: ["#shorts", "#mcdonalds", "#history"],
       }),
     );
-    expect(kit.length).toBeLessThan(4096);
-    expect(kit).toContain("#shorts #mcdonalds #history");
+    expect(messages.join("\n")).toContain("#shorts #mcdonalds #history");
+  });
+});
+
+/**
+ * A documentary part published with two lines under it is undersold, so the
+ * description must not be cut to fit a chat limit. Telegram refuses a message
+ * over 4096 characters, so a long kit is SPLIT instead.
+ */
+describe("uploadKitMessages", () => {
+  it("sends a short kit as one message", () => {
+    const messages = uploadKitMessages(fields());
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).not.toContain("— 1/");
+  });
+
+  it("splits a long kit instead of trimming it", () => {
+    const description = Array.from({ length: 40 }, (_, i) => `Paragraph ${i}. ${"word ".repeat(40)}`).join(
+      "\n\n",
+    );
+    const messages = uploadKitMessages(fields({ youtubeDescription: description }));
+
+    expect(messages.length).toBeGreaterThan(1);
+    for (const message of messages) expect(message.length).toBeLessThanOrEqual(4096);
+    // Nothing is lost: the first and last paragraphs both survive.
+    const joined = messages.join("\n");
+    expect(joined).toContain("Paragraph 0.");
+    expect(joined).toContain("Paragraph 39.");
+    expect(joined).not.toContain("…");
+  });
+
+  it("numbers the pieces so a split does not read as a glitch", () => {
+    const messages = uploadKitMessages(
+      fields({ youtubeDescription: Array.from({ length: 40 }, () => "word ".repeat(40)).join("\n\n") }),
+    );
+    expect(messages[0]).toContain(`— 1/${messages.length} —`);
+  });
+
+  it("cuts a single over-long paragraph rather than dropping it", () => {
+    // Nothing to split on, so this is the one case where text is divided
+    // mid-sentence — still better than losing it.
+    const messages = uploadKitMessages(fields({ youtubeDescription: "x".repeat(9000) }));
+    expect(messages.length).toBeGreaterThan(2);
+    expect(messages.join("").match(/x/gu)?.length).toBe(9000);
+  });
+
+  it("returns nothing when there is nothing to send", () => {
+    expect(uploadKitMessages({ youtubeTitle: "", youtubeDescription: "", tags: [] })).toEqual([]);
   });
 });
