@@ -131,10 +131,31 @@ export class FfmpegThumbnailProvider implements ThumbnailProvider {
 
 /* --------------------------------- ASS text --------------------------------- */
 
-/** One-cue ASS: huge centered white text, thick black outline, accent glow. */
+/**
+ * One-cue ASS: huge white text, thick black outline, accent glow.
+ *
+ * WHERE the text goes is the part that was wrong. The cover illustration is
+ * generated under an explicit composition rule — one subject filling the LEFT
+ * two thirds, the right third deliberately kept calm and empty "so text can sit
+ * there" — and then this burned it dead centre, straight over the subject the
+ * prompt had just paid to frame. A McDonald's cover came back with "9 ITEM MENU"
+ * across the middle of the burger and an empty third beside it.
+ *
+ * Wide covers now place the text in the third that was reserved for it. The
+ * portrait cover stays centred: it is a different crop of the same image, and
+ * the left-two-thirds rule does not survive the crop to 9:16.
+ */
 function renderCoverAss(text: string, ctx: ThumbnailContext, width: number, height: number): string {
-  const fontSize = Math.round(Math.min(width, height) / (width < height ? 6.5 : 5.5));
+  const landscape = width > height;
+  // Smaller on a wide cover because the text now lives in a third of the frame
+  // rather than across all of it, and has to wrap inside that column.
+  const fontSize = Math.round(Math.min(width, height) / (landscape ? 7.5 : 6.5));
   const marginH = Math.round(width * 0.06);
+  // Alignment 6 = middle-right, with the left margin pushing the text box into
+  // the reserved third. 5 = middle-centre, which is right for the 9:16 crop.
+  const alignment = landscape ? 6 : 5;
+  const marginL = landscape ? Math.round(width * 0.6) : marginH;
+  const marginR = landscape ? Math.round(width * 0.04) : marginH;
   const outline = Math.max(6, Math.round(fontSize / 14));
   const shadow = Math.max(3, Math.round(outline / 2));
   const white = "&H00FFFFFF";
@@ -146,13 +167,14 @@ function renderCoverAss(text: string, ctx: ThumbnailContext, width: number, heig
     "ScriptType: v4.00+",
     `PlayResX: ${width}`,
     `PlayResY: ${height}`,
+    // 0 = smart wrapping, balancing the lines. In a narrow column this is
+    // what keeps four words from becoming one long line and three short ones.
     "WrapStyle: 0",
     "ScaledBorderAndShadow: yes",
     "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    // Alignment 5 = middle-center: the text sits over the image's focal area.
-    `Style: Cover,${ctx.fontName},${fontSize},${white},${white},${black},${glow},1,0,0,0,100,100,2,0,1,${outline},${shadow},5,${marginH},${marginH},0,1`,
+    `Style: Cover,${ctx.fontName},${fontSize},${white},${white},${black},${glow},1,0,0,0,100,100,2,0,1,${outline},${shadow},${alignment},${marginL},${marginR},0,1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

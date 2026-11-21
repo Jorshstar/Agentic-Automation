@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   OpenAIImageGenerationProvider,
   assertImageModelAvailable,
@@ -6,6 +7,7 @@ import {
 import { OpenAIVoiceGenerationProvider } from "../providers/voice-generation/index.js";
 import { FfmpegCompositionProvider } from "../providers/composition/index.js";
 import { assertMediaTools } from "../lib/binaries.js";
+import { uploadKit } from "./upload-kit.js";
 import { research, subjectOf } from "./research.js";
 import { LongformScriptWriter, WORDS_PER_MINUTE } from "./script.js";
 import type { ScriptBeat } from "./script.js";
@@ -286,6 +288,29 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
     })
     .catch(() => undefined);
   if (seo?.youtube?.title) log(`   "${seo.youtube.title}"`);
+
+  // Write the kit and the script beside the video.
+  //
+  // Everything after this point can still fail — one part stalled for thirteen
+  // minutes inside the upload and delivered nothing — and until now the title,
+  // description, tags and the script itself existed only in this function's
+  // memory. The video survived on disk and the words that go with it did not,
+  // so there was no way to send the part on afterwards without regenerating it.
+  const kitText = uploadKit({
+    youtubeTitle: seo?.youtube?.title ?? "",
+    youtubeDescription: seo?.youtube?.description ?? "",
+    tags: seo?.youtube?.tags ?? [],
+  });
+  await Promise.all([
+    kitText === ""
+      ? Promise.resolve()
+      : writeFile(join(workDir, "upload-kit.txt"), kitText, "utf8").catch(() => {}),
+    writeFile(
+      join(workDir, "script.json"),
+      JSON.stringify({ title: script.title, summary: script.summary, beats }, null, 2),
+      "utf8",
+    ).catch(() => {}),
+  ]);
 
   /* -------------------------- remember this part -------------------------- */
   const record: SeriesRecord = {
