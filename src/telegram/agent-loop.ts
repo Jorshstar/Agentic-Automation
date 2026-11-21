@@ -103,6 +103,20 @@ async function handleUpdate(
   const decision = await agent.respond({ messages: session.messages, assetCount: session.assets.length });
   session = withMessage(session, { role: "assistant", text: decision.reply });
 
+  // What was asked, and what the brain decided to do about it.
+  //
+  // Without this the log says "handled 1 update(s), 0 job(s) started" and
+  // nothing else, so a request that was answered but not ACTED on is
+  // indistinguishable from one that was never received — and the only way to
+  // find out which is to ask the person what they typed. This is their own
+  // machine and their own log; it goes nowhere else.
+  console.log(`   ⇢ "${userText.replace(/\s+/gu, " ").slice(0, 120)}"`);
+  console.log(
+    `   ⇠ ${decision.action}${decision.action === "clip" ? ` (${decision.theme || "auto"})` : ""}` +
+      `${decision.action === "documentary" ? ` (${decision.documentaryTopic || "continue"})` : ""}` +
+      `: ${decision.reply.replace(/\s+/gu, " ").slice(0, 120)}`,
+  );
+
   if (decision.action === "build") {
     const useAssets = decision.useAssets && session.assets.length > 0;
     await customUploadVideo.trigger({

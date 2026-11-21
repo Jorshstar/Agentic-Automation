@@ -212,7 +212,7 @@ export function selectFromSignals(input: SelectInput): readonly ClipMoment[] {
     return {
       startSecond: start,
       endSecond: end,
-      hook: hookFromTranscript(input, start, end) ?? defaultHook(plan.theme),
+      hook: actionHook(input, start, end, plan.theme),
       reason: event.kind === "surge" ? "sustained crowd reaction" : "sharp audio spike",
       score: strength, // normalised below
       evidence,
@@ -256,7 +256,7 @@ function momentFromBurst(burst: CutBurst, input: SelectInput): ClipMoment {
   return {
     startSecond: start,
     endSecond: end,
-    hook: hookFromTranscript(input, start, end) ?? defaultHook(plan.theme),
+    hook: actionHook(input, start, end, plan.theme),
     reason: "replay burst — the edit marks this as a highlight",
     score: burst.cuts * 6 * (plan.weights.scene * 2) + (loud ? eventStrength(loud) * 0.5 : 0),
     evidence,
@@ -449,6 +449,20 @@ export function describeEvents(events: readonly AudioEvent[], cuts: readonly Sce
       return `${Math.round(event.startSecond)}-${Math.round(event.endSecond)}s ${event.kind} +${event.prominenceDb}dB${replayNote}`;
     })
     .join("; ");
+}
+
+/**
+ * A title for a signal-detected clip.
+ *
+ * In ACTION mode the words are deliberately not read, because there are none
+ * worth reading — so they must not be read for the title either. Whisper on a
+ * music-only reel returns invented sentences, and one run titled its clips with
+ * Japanese railway history taken straight from that invention. When there is
+ * nothing to read, say what the theme is and stop.
+ */
+function actionHook(input: SelectInput, start: number, end: number, theme: string): string {
+  if (input.mode === "action") return defaultHook(theme);
+  return hookFromTranscript(input, start, end) ?? defaultHook(theme);
 }
 
 /** Build a hook from whatever was said inside the window, if anything. */

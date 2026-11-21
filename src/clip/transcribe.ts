@@ -203,3 +203,45 @@ export async function transcribeWindows(
 
 /** Padding applied either side of a window so edge words survive. */
 const WINDOW_PAD_SECONDS = 1.5;
+
+/**
+ * WHISPER HALLUCINATION DETECTOR.
+ *
+ * Fed audio with no speech in it — a music-only highlights reel, a stadium
+ * ambience track — Whisper does not return nothing. It returns confident
+ * sentences that were never said. A 2:10 no-commentary World Cup final came
+ * back as seven variations of one line:
+ *
+ *   193.Francisco Ramos heads the ball to Kovacic, who is on the attack.
+ *   194.Ramos dribbles to Kovacic, who is on the attack.
+ *   195.Ramos dribbles to Kovacic, who is on the attack.
+ *
+ * That did real damage, not cosmetic. 64 invented words over 129 seconds is
+ * 30 wpm, which clears the "this video has speech" threshold, so the pipeline
+ * routed a wordless video down the speech path and handed the invention to the
+ * selector as evidence. It also supplied clip titles — one run shipped hooks
+ * about the Kyoto subway.
+ *
+ * The signature is degeneracy, and it measures cleanly. Real commentary reuses
+ * words but keeps saying new ones; a hallucination loops. Measured on the two
+ * transcripts above:
+ *
+ *                      unique words / words   unique lines / lines
+ *   hallucination              0.225                  0.429
+ *   real commentary            0.446                  0.964
+ *
+ * Both tests must fail together before a transcript is rejected, which leaves a
+ * wide margin on each. Word variety alone would be unsafe, because the ratio
+ * naturally falls as a transcript gets longer.
+ */
+export function looksHallucinated(segments: readonly TranscriptSegment[]): boolean {
+  const words = segments.flatMap((segment) => segment.text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []);
+  // Too little to judge. A transcript this short is already treated as speechless.
+  if (words.length < 20 || segments.length < 4) return false;
+
+  const wordVariety = new Set(words).size / words.length;
+  const lines = segments.map((segment) => segment.text.toLowerCase().replace(/[^\p{L} ]/gu, "").trim());
+  const lineVariety = new Set(lines).size / lines.length;
+
+  return wordVariety < 0.3 && lineVariety < 0.7;
+}

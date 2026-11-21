@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { resolveSource, fetchAutoCaptions, isRemoteUrl } from "./source-download.js";
-import { transcribe, transcribeWindows } from "./transcribe.js";
+import { transcribe, transcribeWindows, looksHallucinated } from "./transcribe.js";
 import type { Transcript, TranscriptSegment, TranscriptWord } from "./transcribe.js";
 import { analyzeAudio } from "./audio-energy.js";
 import { detectSceneCuts } from "./scene-detect.js";
@@ -201,7 +201,13 @@ export async function runClipJob(
 
   /* ----------------------- 3. transcript for choosing ---------------------- */
   const selection = await transcriptForSelection(input, source.videoPath, source.durationSeconds, opts.workDir, log);
-  const wordCount = countWords(selection.segments);
+  // Invented words count as words, and that is how a silent reel ends up on the
+  // speech path being asked about sentences nobody said.
+  const invented = looksHallucinated(selection.segments);
+  if (invented) {
+    log("🫥 The transcript is invented (no real speech in this one) — ignoring it.");
+  }
+  const wordCount = invented ? 0 : countWords(selection.segments);
   const mode = effectiveMode(plan, wordCount, source.durationSeconds);
   if (mode === "action" && plan.mode !== "action") {
     log("🎵 Barely any speech here — switching to audio-and-cuts detection.");
@@ -219,7 +225,7 @@ export async function runClipJob(
     title: source.title,
     description: source.description,
     durationSeconds: source.durationSeconds,
-    segments: selection.segments,
+    segments: invented ? [] : selection.segments,
     audio,
     sceneCuts,
     chapters: source.chapters,

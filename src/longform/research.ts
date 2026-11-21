@@ -62,12 +62,30 @@ export interface ResearchResult {
  * refuse a run that would otherwise produce an unsourced script.
  */
 export async function research(topic: string, maxArticles = 3): Promise<ResearchResult> {
-  const found = await searchTitles(topic, maxArticles);
+  // Search the SUBJECT, not the headline. Wikipedia's full-text search scores
+  // every word, so "HOW McDONALD'S CONQUERED THE WORLD" returns World War I.
+  const subject = subjectOf(topic);
+  let found = await searchTitles(subject, maxArticles);
   if (found.failed) {
     return { articles: [], sourceText: "", citations: [], failure: "failed" };
   }
+  // Trimming can go too far on a phrasing this does not know. The full topic is
+  // a worse query but never a wrong one, so it is the fallback, not the default.
+  if (subject !== topic && !isAbout(found.titles, subject)) {
+    const whole = await searchTitles(topic, maxArticles);
+    if (!whole.failed && isAbout(whole.titles, topic)) found = whole;
+  }
+
   const titles = found.titles;
   if (titles.length === 0) {
+    return { articles: [], sourceText: "", citations: [], failure: "empty" };
+  }
+  // Results that are not about the subject are worse than no results. They look
+  // like success all the way down: the writer draws on its own memory, the fact
+  // checker compares that against articles on a different subject, every beat
+  // is flagged, and the run dies reporting a writing problem. A McDonald's
+  // documentary failed exactly this way on sources about the world wars.
+  if (!isAbout(titles, subject) && !isAbout(titles, topic)) {
     return { articles: [], sourceText: "", citations: [], failure: "empty" };
   }
 
@@ -96,6 +114,86 @@ export async function research(topic: string, maxArticles = 3): Promise<Research
     sourceText,
     citations: articles.map((article) => article.url),
   };
+}
+
+/* ------------------------------ topic -> query ----------------------------- */
+
+/** Framing that tells you the shape of a video, not what to look up. */
+const LEADING_FRAME =
+  /^(?:the\s+)?(?:how|why|what|when|where|inside|story of|the story of|untold story of|the untold story of|true story of|the true story of|history of|the history of|rise and fall of|the rise and fall of|rise of|the rise of|fall of|the fall of|truth about|the truth about|secret[s]? of|the secret[s]? of|making of|the making of|documentary (?:on|about))\s+/iu;
+
+/**
+ * Narrative predicates. Everything from here on describes what the subject DID,
+ * which is the part of a title that poisons a keyword search — "conquered the
+ * world" is why a McDonald's query came back with the world wars.
+ */
+const TRAILING_PREDICATE =
+  /\s+(?:conquered|took over|take over|changed|changes|changing|became|become|built|build|made|make|ruled|rules|won|win|lost|lose|died|dies|failed|fails|collapsed|collapses|fell|falls|rose|rises|beat|destroyed|destroys|created|creates|invented|invents|stopped|stops|ended|ends|went|goes|saved|saves|lost|dominated|dominates|disappeared|disappears)\b.*$/iu;
+
+/**
+ * The searchable subject inside a documentary title.
+ *
+ *   "HOW McDONALD'S CONQUERED THE WORLD"      -> "McDONALD'S"
+ *   "the rise and fall of Blockbuster"        -> "Blockbuster"
+ *   "why the Concorde stopped flying"         -> "the Concorde"
+ *
+ * Returns the original when trimming would leave nothing to search for — a
+ * worse query beats an empty one.
+ */
+export function subjectOf(topic: string): string {
+  const trimmed = topic
+    .trim()
+    .replace(/^["'\u201c\u2018]+|["'\u201d\u2019]+$/gu, "")
+    .replace(LEADING_FRAME, "")
+    .replace(TRAILING_PREDICATE, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return trimmed.length >= 3 ? trimmed : topic.trim();
+}
+
+/** Words too common to prove an article is about anything. */
+const STOPWORDS = new Set([
+  "the", "a", "an", "of", "and", "or", "in", "on", "at", "to", "for", "from", "by", "with",
+  "its", "his", "her", "their", "world", "story", "history", "rise", "fall", "how", "why",
+  "what", "when", "where", "inside", "first", "last", "new", "old", "big", "great",
+]);
+
+/** Comparable form: lowercase letters and digits only, so "McDonald's" ~ "McDonalds". */
+function normalise(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ");
+}
+
+/**
+ * Does this set of articles plausibly cover the subject?
+ *
+ * One distinctive word shared with a title is enough — Wikipedia's own titles
+ * are terse, so "McDonald's" matches "History of McDonald's" and "Richard and
+ * Maurice McDonald" while matching nothing in "World War I".
+ */
+export function isAbout(titles: readonly string[], subject: string): boolean {
+  const terms = normalise(subject)
+    .split(" ")
+    .filter((word) => word.length >= 3 && !STOPWORDS.has(word));
+  if (terms.length === 0) return true; // nothing distinctive to check against
+
+  const words = titles.flatMap((title) => normalise(title).split(" ").filter(Boolean));
+  return terms.some((term) => words.some((word) => sameWord(word, stem(term))));
+}
+
+/** Drop a plural or possessive so "McDonald's" and "McDonald" are one word. */
+function stem(word: string): string {
+  return word.replace(/(?:'s|s)$/u, "");
+}
+
+/**
+ * Prefix matching in either direction, but only between words long enough for
+ * a shared prefix to mean something. Without the length floor a three-letter
+ * title word ("war", "con") would match any term beginning with it.
+ */
+function sameWord(word: string, term: string): boolean {
+  const left = stem(word);
+  if (left === term) return true;
+  return left.length >= 4 && term.length >= 4 && (left.startsWith(term) || term.startsWith(left));
 }
 
 /**

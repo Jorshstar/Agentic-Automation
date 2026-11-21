@@ -6,7 +6,7 @@ import {
 import { OpenAIVoiceGenerationProvider } from "../providers/voice-generation/index.js";
 import { FfmpegCompositionProvider } from "../providers/composition/index.js";
 import { assertMediaTools } from "../lib/binaries.js";
-import { research } from "./research.js";
+import { research, subjectOf } from "./research.js";
 import { LongformScriptWriter, WORDS_PER_MINUTE } from "./script.js";
 import type { ScriptBeat } from "./script.js";
 import { ScriptVerifier } from "./verify.js";
@@ -111,7 +111,8 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
     throw new Error(
       sources.failure === "failed"
         ? "Source lookup failed (rate limited or offline). Refusing to write from memory — try again shortly."
-        : `No sources found for "${topic}". Refusing to write from memory — try naming the subject more directly.`,
+        : `No sources found about "${subjectOf(topic)}". Refusing to write from memory — ` +
+          `name the subject more directly (e.g. "McDonald's" rather than a headline about it).`,
     );
   }
   log(`   ${sources.articles.map((article) => article.title).join(", ")}`);

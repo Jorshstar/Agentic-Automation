@@ -156,14 +156,33 @@ describe("selectFromSignals — the goals case", () => {
     expect(moments[0]!.startSecond).toBe(0);
   });
 
-  it("names the moment from commentary when there is any", () => {
+  it("names the moment from commentary when the words are being read", () => {
     const moments = selectFromSignals(
       input({
+        // This is the LLM-failed fallback on a video that does have speech.
+        mode: "mixed",
         audio: audio([surge(600, 6, 16)]),
         segments: [{ start: 598, end: 606, text: "Oh that is an absolutely stunning strike from range" }],
       }),
     );
     expect(moments[0]!.hook.toLowerCase()).toContain("stunning");
+  });
+
+  /**
+   * Action mode means the words were judged not worth reading. On a music-only
+   * reel Whisper does not return silence, it returns invention — one real run
+   * titled its clips with Japanese railway history. If the words are not
+   * trusted for selection they cannot be trusted for the title either.
+   */
+  it("refuses to title a clip from a transcript it is not reading", () => {
+    const moments = selectFromSignals(
+      input({
+        mode: "action",
+        audio: audio([surge(600, 6, 16)]),
+        segments: [{ start: 598, end: 606, text: "1988年4月20日 京都市営地下鉄東京駅開業" }],
+      }),
+    );
+    expect(moments[0]!.hook).toBe("The Goals");
   });
 });
 
