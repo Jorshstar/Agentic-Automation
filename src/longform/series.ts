@@ -120,6 +120,8 @@ export class FileSeriesStore implements SeriesStore {
 /* ------------------------------ upstash store ----------------------------- */
 
 const KEY_PREFIX = "longform:series:";
+/** Three attempts at ten seconds is ~30s worst case, not forever. */
+const COMMAND_TIMEOUT_MS = 10_000;
 
 export class UpstashSeriesStore implements SeriesStore {
   constructor(
@@ -160,6 +162,12 @@ export class UpstashSeriesStore implements SeriesStore {
         method: "POST",
         headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
         body: JSON.stringify(command),
+        // A fetch with no deadline can wait forever on a half-open socket, and
+        // this call sits at the END of a finished documentary: the video was
+        // rendered, the cover drawn, the upload kit written, and then the run
+        // stopped for thirteen minutes on a save, with nothing delivered and
+        // nothing in the log to say why.
+        signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
       });
       if (!result.ok) throw new Error(`Upstash command failed (${result.status})`);
       return result;
@@ -169,15 +177,75 @@ export class UpstashSeriesStore implements SeriesStore {
   }
 }
 
+/* ------------------------------ mirrored store ----------------------------- */
+
 /**
- * Upstash when it is configured, a local file otherwise.
+ * Upstash, with a local file kept in step behind it.
+ *
+ * Losing this record is not cosmetic — it is what part two reads to know what
+ * part one already said, so a failed save means the next part retells the
+ * story. But a failed save must not cost the finished video either, and
+ * Upstash on this machine has been intermittent ("clip queue read failed:
+ * TypeError: fetch failed" several times in one day).
+ *
+ * So every write goes to both, and a remote failure is reported and survived
+ * rather than thrown. A read prefers the remote — the cloud task may have
+ * written a part this machine never saw — and falls back to the file.
+ */
+export class MirroredSeriesStore implements SeriesStore {
+  constructor(
+    private readonly remote: SeriesStore,
+    private readonly local: SeriesStore = new FileSeriesStore(),
+    private readonly onWarn: (message: string) => void = () => {},
+  ) {}
+
+  async get(seriesId: string): Promise<SeriesRecord | undefined> {
+    try {
+      const remote = await this.remote.get(seriesId);
+      if (remote) return remote;
+    } catch (error) {
+      this.onWarn(`series lookup failed remotely (${short(error)}) — using the local copy`);
+    }
+    return this.local.get(seriesId);
+  }
+
+  async save(record: SeriesRecord): Promise<void> {
+    // Local first: it is the copy that cannot fail for network reasons, and it
+    // is what keeps the series continuous if the remote is down.
+    await this.local.save(record).catch(() => {});
+    try {
+      await this.remote.save(record);
+    } catch (error) {
+      this.onWarn(`series save failed remotely (${short(error)}) — kept locally`);
+    }
+  }
+
+  async list(): Promise<readonly SeriesRecord[]> {
+    try {
+      const remote = await this.remote.list();
+      if (remote.length > 0) return remote;
+    } catch {
+      /* fall through to the local copy */
+    }
+    return this.local.list();
+  }
+}
+
+function short(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 120);
+}
+
+/**
+ * Upstash mirrored to a local file when it is configured, the file alone
+ * otherwise.
  *
  * The file store is not a degraded fallback here: the whole studio runs on one
  * machine, so a file is a perfectly good home for this. Upstash matters only
  * when the cloud task and the local worker both need to see the same series.
  */
-export function createSeriesStore(): SeriesStore {
+export function createSeriesStore(onWarn?: (message: string) => void): SeriesStore {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  return url && token ? new UpstashSeriesStore(url, token) : new FileSeriesStore();
+  if (!url || !token) return new FileSeriesStore();
+  return new MirroredSeriesStore(new UpstashSeriesStore(url, token), new FileSeriesStore(), onWarn);
 }

@@ -12,6 +12,8 @@ import type { ClipJob } from "./run-clip-job.js";
  */
 
 const QUEUE_KEY = "content-studio:clip-queue";
+/** Three attempts at ten seconds: bounded, not forever. */
+const COMMAND_TIMEOUT_MS = 10_000;
 
 /**
  * A documentary job: make the next part of a narrated series.
@@ -106,6 +108,10 @@ class UpstashClipQueue implements ClipQueue {
         method: "POST",
         headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
         body: JSON.stringify(command),
+        // Without a deadline a half-open socket stalls the poll forever, and a
+        // worker that is neither working nor erroring is the hardest kind of
+        // down to notice.
+        signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
       });
       if (!res.ok) throw new Error(`Upstash command failed (${res.status})`);
       return res;
