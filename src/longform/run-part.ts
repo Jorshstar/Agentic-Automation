@@ -81,6 +81,8 @@ export interface PartResult {
   readonly youtubeTitle: string;
   readonly youtubeDescription: string;
   readonly tags: readonly string[];
+  /** The two or three that go under the title on YouTube, not the tag list. */
+  readonly hashtags: readonly string[];
 }
 
 export async function runPart(request: PartRequest, store: SeriesStore = createSeriesStore()): Promise<PartResult> {
@@ -300,6 +302,7 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
     youtubeTitle: seo?.youtube?.title ?? "",
     youtubeDescription: seo?.youtube?.description ?? "",
     tags: seo?.youtube?.tags ?? [],
+    hashtags: seo?.youtube?.hashtags ?? [],
   });
   await Promise.all([
     kitText === ""
@@ -364,6 +367,9 @@ export async function runPart(request: PartRequest, store: SeriesStore = createS
       ? `${seo.youtube.description}\n\nSources:\n${sources.citations.join("\n")}`
       : "",
     tags: seo?.youtube?.tags ?? [],
+    // Dropped here until now, so the chat got a kit with no hashtags in it
+    // however well the SEO stage had done its job.
+    hashtags: seo?.youtube?.hashtags ?? [],
   };
 }
 
