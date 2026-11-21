@@ -78,9 +78,16 @@ export function continuationBrief(record: SeriesRecord | undefined): string {
     .map((part) => `Part ${part.part} — ${part.title}\n${part.summary}`)
     .join("\n\n");
   const last = record.parts.at(-1)!;
+  // Only quote a closing line we actually have. A part recovered after an
+  // interrupted run may have no recorded last line, and printing an empty quote
+  // would tell the writer to continue from something nobody said.
+  const endedOn =
+    last.lastLine.trim() === ""
+      ? ""
+      : `The previous part ended on this line:\n"${last.lastLine}"\n\n`;
   return (
     `${parts}\n\n` +
-    `The previous part ended on this line:\n"${last.lastLine}"\n\n` +
+    endedOn +
     `This is PART ${record.parts.length + 1}. Continue from there. Do not retell ` +
     `anything above — the viewer has seen it.`
   );
