@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { resolveMediaTool } from "../lib/binaries.js";
 
@@ -34,6 +35,57 @@ export interface CompileResult {
 /** 30 fps at the join: a mixed-rate concat stutters at every seam. */
 const OUTPUT_FPS = 30;
 const CRF = process.env.CLIP_CRF ?? "20";
+const AUDIO_KBPS = 160;
+
+/**
+ * THE JOINED FILE HAS TO FIT THROUGH TELEGRAM.
+ *
+ * The first joined reel was 66 MB: four goals, 62 seconds, 1080p at CRF 20 —
+ * about 8.5 Mbps, nearly three times the bitrate of the source it was cut from.
+ * The Bot API refuses a video over 50 MB, so the delivery sent the caption and
+ * no video, and the chat said "couldn't produce clips" about four clips that
+ * had rendered perfectly.
+ *
+ * Separate clips never hit this because each one was 14-21 MB on its own. The
+ * moment they became one file, the sum was the problem.
+ *
+ * So the join is encoded to a BYTE BUDGET rather than to a quality target: work
+ * out how many bits per second fit in the budget, and cap the encoder there.
+ * Quality-capped VBR (CRF plus a hard maxrate) keeps the easy seconds cheap and
+ * only spends the cap on the hard ones.
+ */
+const UPLOAD_LIMIT_MB = Number(process.env.TELEGRAM_MAX_UPLOAD_MB ?? 50);
+/**
+ * Headroom for container overhead and the encoder overshooting its cap.
+ *
+ * Quality-capped VBR treats maxrate as a ceiling on the rate window, not a
+ * promise about the file, and on hard content (football is hard — grass,
+ * crowd, constant motion) it rides that ceiling. Measured overshoot on the
+ * first real reel was 1.3%; this leaves far more room than that, because a
+ * file one megabyte over the limit is as undeliverable as one twenty over.
+ */
+const BUDGET_FRACTION = 0.85;
+
+/**
+ * A local telegram-bot-api server raises the limit to 2 GB, so there is no
+ * reason to spend quality on a budget that no longer applies.
+ */
+function budgetBytes(): number {
+  const localApi = (process.env.TELEGRAM_API_BASE ?? "").trim();
+  if (localApi !== "" && !localApi.includes("api.telegram.org")) return Number.POSITIVE_INFINITY;
+  return UPLOAD_LIMIT_MB * 1024 * 1024 * BUDGET_FRACTION;
+}
+
+/**
+ * Video bitrate that fits `seconds` of footage into `bytes`, or undefined when
+ * there is no meaningful limit. Floored at 800 kbps: below that the reel is too
+ * ugly to be worth sending, and the caller is better off with separate clips.
+ */
+export function bitrateForBudget(seconds: number, bytes: number): number | undefined {
+  if (!Number.isFinite(bytes) || seconds <= 0) return undefined;
+  const totalKbps = (bytes * 8) / 1000 / seconds;
+  return Math.max(800, Math.floor(totalKbps - AUDIO_KBPS));
+}
 
 export async function compileClips(
   paths: readonly string[],
@@ -47,6 +99,23 @@ export async function compileClips(
 
   const ffmpeg = await resolveMediaTool("ffmpeg");
   const inputs = paths.flatMap((path) => ["-i", path]);
+
+  // Measured, not assumed: the clips were trimmed and may not match what was
+  // asked for, and a wrong duration here produces a wrong bitrate.
+  const durations = await Promise.all(paths.map((path) => probeDuration(path)));
+  const totalSeconds = durations.reduce((sum, seconds) => sum + seconds, 0);
+  const videoKbps = bitrateForBudget(totalSeconds, budgetBytes());
+  const rateControl =
+    videoKbps === undefined
+      ? ["-crf", CRF]
+      : [
+          "-crf",
+          CRF,
+          "-maxrate",
+          `${videoKbps}k`,
+          "-bufsize",
+          `${videoKbps * 2}k`,
+        ];
 
   // Normalise each stream, then concat. `setsar=1` and a fixed fps are the two
   // things that actually differ enough to corrupt a join.
@@ -79,8 +148,7 @@ export async function compileClips(
         "libx264",
         "-preset",
         "fast",
-        "-crf",
-        CRF,
+        ...rateControl,
         "-pix_fmt",
         "yuv420p",
         "-movflags",
@@ -108,7 +176,31 @@ export async function compileClips(
   if (durationSeconds <= 0) {
     return { ok: false, path: "", durationSeconds: 0, error: "joined file has no duration" };
   }
+
+  // The cap is a cap on the encoder, not a guarantee about the file. Check what
+  // actually came out, because a file that cannot be sent is worth less than
+  // the separate clips the caller still has.
+  const limit = budgetBytes();
+  if (Number.isFinite(limit)) {
+    const size = await fileBytes(outPath);
+    if (size > UPLOAD_LIMIT_MB * 1024 * 1024) {
+      return {
+        ok: false,
+        path: "",
+        durationSeconds,
+        error: `joined file is ${(size / 1024 / 1024).toFixed(1)} MB, over the ${UPLOAD_LIMIT_MB} MB upload limit`,
+      };
+    }
+  }
   return { ok: true, path: outPath, durationSeconds };
+}
+
+async function fileBytes(path: string): Promise<number> {
+  try {
+    return (await stat(path)).size;
+  } catch {
+    return 0;
+  }
 }
 
 async function probeDuration(path: string): Promise<number> {

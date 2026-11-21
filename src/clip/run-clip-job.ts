@@ -121,6 +121,14 @@ export interface ClipJobResult {
   readonly clips: readonly RenderedClip[];
   /** Set when the moments were joined into one video, and that is what shipped. */
   readonly compilationPath?: string;
+  /**
+   * Why nothing arrived, when clips were made but not delivered.
+   *
+   * Without this the chat says "couldn't produce clips" about clips that
+   * rendered perfectly and were refused by the upload — which sends the user
+   * looking for a clipping bug that is not there.
+   */
+  readonly note?: string;
   /** Audio minutes actually sent to Whisper — the main variable cost. */
   readonly transcribedMinutes: number;
 }
@@ -399,19 +407,25 @@ export async function runClipJob(
       caption: buildCompilationCaption(good, compilationSeconds, plan, source.title),
       documents: [],
     });
-    return {
-      delivered: sent.videoSent ? 1 : 0,
-      found: finalMoments.length,
-      title: source.title,
-      clips: good.map((clip) => ({ ...clip, delivered: sent.videoSent })),
-      compilationPath,
-      transcribedMinutes: round1(transcribedMinutes),
-    };
+    if (sent.videoSent) {
+      return {
+        delivered: 1,
+        found: finalMoments.length,
+        title: source.title,
+        clips: good.map((clip) => ({ ...clip, delivered: true })),
+        compilationPath,
+        transcribedMinutes: round1(transcribedMinutes),
+      };
+    }
+    // The reel exists but could not be sent. The clips are still right here, so
+    // send those rather than reporting a failure the user cannot act on.
+    log(`⚠️ Couldn't send the joined video (${describeWarnings(sent.warnings)}). Sending the clips separately.`);
   }
 
   // Sequential on purpose: Telegram rate-limits uploads, and a burst of parallel
   // sends gets throttled and arrives out of order.
   const finalClips: RenderedClip[] = [];
+  const deliveryWarnings: string[] = [];
   let delivered = 0;
   for (const clip of good) {
     const result = await delivery.deliver({
@@ -420,6 +434,7 @@ export async function runClipJob(
       documents: [],
     });
     if (result.videoSent) delivered++;
+    else deliveryWarnings.push(describeWarnings(result.warnings));
     finalClips.push({ ...clip, delivered: result.videoSent });
   }
 
@@ -428,8 +443,14 @@ export async function runClipJob(
     found: finalMoments.length,
     title: source.title,
     clips: finalClips,
+    note: delivered === 0 && deliveryWarnings.length > 0 ? deliveryWarnings.join("; ") : undefined,
     transcribedMinutes: round1(transcribedMinutes),
   };
+}
+
+/** Delivery warnings in one line, for a log or a chat message. */
+function describeWarnings(warnings: readonly { message: string }[]): string {
+  return warnings.map((warning) => warning.message).join("; ") || "no reason given";
 }
 
 /**

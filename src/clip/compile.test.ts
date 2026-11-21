@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { wantsCompilation } from "./compile.js";
+import { wantsCompilation, bitrateForBudget } from "./compile.js";
 import { shouldCompile, stripExtras } from "./run-clip-job.js";
 import { findCutBursts } from "./scene-detect.js";
 import type { SceneCut } from "./scene-detect.js";
@@ -100,5 +100,38 @@ describe("stripExtras keeps the subject but drops the packaging", () => {
   it("leaves a theme that is only an instruction alone", () => {
     // Stripping to nothing would leave the selector with no subject at all.
     expect(stripExtras("one video")).toBe("one video");
+  });
+});
+
+/**
+ * The joined reel has to fit through the upload. The first one did not: four
+ * goals at 1080p CRF 20 came to 66 MB, the Bot API refused it at 50, and the
+ * chat reported a clipping failure about clips that had rendered perfectly.
+ */
+describe("bitrateForBudget", () => {
+  const mb = (n: number) => n * 1024 * 1024;
+
+  it("fits a minute of footage into the budget", () => {
+    const kbps = bitrateForBudget(62, mb(44))!;
+    // Sanity-check the arithmetic the other way round: bits back into bytes.
+    const bytes = ((kbps + 160) * 1000 * 62) / 8;
+    expect(bytes).toBeLessThanOrEqual(mb(44));
+    expect(bytes).toBeGreaterThan(mb(40));
+  });
+
+  it("gives a longer reel proportionally less", () => {
+    expect(bitrateForBudget(240, mb(44))!).toBeLessThan(bitrateForBudget(60, mb(44))!);
+  });
+
+  it("refuses to go below a watchable floor", () => {
+    expect(bitrateForBudget(3600, mb(44))).toBe(800);
+  });
+
+  it("imposes no cap when there is no limit", () => {
+    expect(bitrateForBudget(62, Number.POSITIVE_INFINITY)).toBeUndefined();
+  });
+
+  it("is safe on a zero duration", () => {
+    expect(bitrateForBudget(0, mb(44))).toBeUndefined();
   });
 });

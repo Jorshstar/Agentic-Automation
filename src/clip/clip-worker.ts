@@ -222,15 +222,21 @@ async function mostRecentSeriesTopic(): Promise<string> {
 
 /** Run a queued job, reporting the outcome to the chat. */
 async function process_(
-  run: () => Promise<{ delivered: number; title: string }>,
+  run: () => Promise<{ delivered: number; title: string; note?: string }>,
   telegram: TelegramClient,
 ): Promise<void> {
   try {
     const result = await run();
+    // "Couldn't produce clips" was being said about clips that had rendered
+    // perfectly and were then refused by the upload. If delivery is the reason,
+    // say delivery — the user cannot fix a clipping bug that is not there.
+    const failure = result.note
+      ? `❌ Made the clips but couldn't send them:\n${result.note.slice(0, 300)}`
+      : "❌ Couldn't produce clips from that one.";
     await telegram.send(
       result.delivered > 0
         ? `✅ Sent ${result.delivered} clip(s) from "${result.title.slice(0, 70)}".`
-        : "❌ Couldn't produce clips from that one.",
+        : failure,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message.slice(0, 400) : String(error);
