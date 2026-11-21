@@ -4,6 +4,7 @@ import type { DocumentaryJob } from "./clip-queue.js";
 import { runPart } from "../longform/run-part.js";
 import { createSeriesStore } from "../longform/series.js";
 import { TelegramDeliveryProvider } from "../providers/delivery/index.js";
+import { uploadKit } from "../longform/upload-kit.js";
 import { runClipJob } from "./run-clip-job.js";
 import {
   archive,
@@ -190,8 +191,17 @@ async function handleDocumentary(
         `${Math.round(result.durationSeconds)}s · ${result.beats} beats · ` +
         `$${result.imagesCostUsd.toFixed(2)}\n` +
         `Sources: ${result.citations.slice(0, 2).join(", ")}`,
-      documents: [],
+      // The cover goes as a DOCUMENT, not a photo. Telegram recompresses
+      // photos, and a recompressed thumbnail is no use for the upload it was
+      // drawn for.
+      documents: result.thumbnailPath ? [result.thumbnailPath] : [],
     });
+
+    // The upload kit, as text to paste straight into YouTube. It was being
+    // written on every part and thrown away: the cover was drawn, the title,
+    // description and tags were generated, and none of it left the machine.
+    const kit = uploadKit(result);
+    if (kit !== "") await telegram.send(kit);
 
     await telegram.send(
       result.complete
